@@ -1,0 +1,31 @@
+name: Deploy Laravel to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy through SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/html/api-santri
+            git --git-dir=/var/repo/site.git --work-tree=/var/www/html/api-santri checkout -f main
+            composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
