@@ -53,6 +53,24 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
+## Report API Identifiers
+
+Every `{laporan}` path segment in the report API is the numeric `id` primary key from the report response/database, not `no_laporan`. For example, use `/api/reports/12/status` to update the report whose `id` is `12`.
+
+Only santri can create reports, list their own reports, or toggle identity on a report they own. Staff can view reports and their internal notes; santri responses omit internal notes. When a report hides identity, the owner's name is masked in staff report lists, details, and messages.
+
+Logout is available at `POST /api/auth/logout`.
+
+## Dashboard and Santri Import API
+
+The dashboard and santri import endpoints require a Bearer token from a `pimpinan` account:
+
+- `GET /api/dashboard/summary` returns santri and report totals grouped by status and category.
+- `GET /api/admin/santri/template` downloads the Excel template.
+- `POST /api/admin/santri/import` accepts an `.xlsx` file and an `action` of `preview` or `import`. Preview does not save data; import revalidates the uploaded workbook and saves only if every non-empty row is valid. Upload the same workbook again with `action=import` after reviewing the preview.
+
+The workbook columns must be `name`, `email`, `nis`, `jenis_kelamin`, `telepon_ortu`, and `password`. Password values in imported rows are treated as temporary; those santri must change them through `POST /api/auth/password` before accessing protected APIs. Each import is limited to 500 rows and 5 MB.
+
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).

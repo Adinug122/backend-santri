@@ -2,64 +2,309 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Catatan;
 use App\Models\Laporan;
+use App\Models\Percakapan;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class LaporanController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
+    private function hasStaffAccess(): bool
+    {
+        $role = Auth::user()?->role;
+
+        return in_array($role, ['pengurus', 'pimpinan'], true);
+    }
+
+    private function canAccessReport(Laporan $laporan): bool
+    {
+        $user = Auth::user();
+
+        if (! $user) {
+            return false;
+        }
+
+        if ($this->hasStaffAccess()) {
+            return true;
+        }
+
+        return (int) $laporan->users_id === (int) $user->id;
+    }
+
+    private function maskedUserPayload(Laporan $laporan): array
+    {
+        $user = $laporan->user;
+        $isOwner = (int) $laporan->users_id === (int) Auth::id();
+
+        return [
+            'name' => $laporan->tampilkan_identitas || $isOwner
+                ? ($user?->name ?? 'Anonymous')
+                : 'Anonymous',
+        ];
+    }
+
+    private function reportPayload(Laporan $laporan, bool $includeInternalNotes): array
+    {
+        $laporan->loadMissing([
+            'user',
+            'percakapans.pengirim',
+            ...($includeInternalNotes ? ['catatans.user'] : []),
+        ]);
+
+        $payload = $laporan->toArray();
+        $payload['user'] = $this->maskedUserPayload($laporan);
+        $ownerId = (int) $laporan->users_id;
+        $identityVisible = $laporan->tampilkan_identitas
+            || $ownerId === (int) Auth::id();
+
+        $payload['percakapans'] = $laporan->percakapans
+            ->map(fn (Percakapan $message) => $this->messagePayload($message, $laporan, $identityVisible))
+            ->values()
+            ->all();
+
+        if (! $includeInternalNotes) {
+            unset($payload['catatans']);
+        }
+
+        return $payload;
+    }
+
+    private function messagePayload(
+        Percakapan $message,
+        Laporan $laporan,
+        bool $identityVisible = false,
+    ): array {
+        $sender = $message->pengirim;
+        $isReportOwner = (int) $sender?->id === (int) $laporan->users_id;
+
+        return [
+            'id' => $message->id,
+            'isi' => $message->isi,
+            'laporan_id' => $message->laporan_id,
+            'pengirim' => [
+                'name' => $isReportOwner && ! $identityVisible
+                    ? 'Anonymous'
+                    : ($sender?->name ?? 'Unknown'),
+            ],
+            'created_at' => $message->created_at,
+            'updated_at' => $message->updated_at,
+        ];
+    }
+
     public function index()
     {
-        //
+        if (! $this->hasStaffAccess()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $laporans = Laporan::with(['user', 'catatans.user', 'percakapans.pengirim'])
+            ->latest()
+            ->get()
+            ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, true));
+
+        return response()->json([
+            'data' => $laporans,
+            'message' => 'Daftar laporan berhasil diambil',
+        ]);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
-
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
-        //
+        if (Auth::user()?->role !== 'santri') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'kategori' => ['required', 'string', 'max:255'],
+            'isi' => ['required', 'string', 'max:10000'],
+            'tampilkan_identitas' => ['nullable', 'boolean'],
+        ]);
+
+        $laporan = Laporan::create([
+            'users_id' => Auth::id(),
+            'no_laporan' => $this->generateNoLaporan(),
+            'kategori' => $request->kategori,
+            'isi' => $request->isi,
+            'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
+            'status' => 'baru',
+            'waktu' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Laporan berhasil dibuat',
+            'laporan' => $laporan,
+        ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
+    public function mine()
+    {
+        if (Auth::user()?->role !== 'santri') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $laporans = Laporan::where('users_id', Auth::id())
+            ->with(['user', 'percakapans.pengirim'])
+            ->latest()
+            ->get()
+            ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, false));
+
+        return response()->json([
+            'data' => $laporans,
+            'message' => 'Daftar laporan milik santri berhasil diambil',
+        ]);
+    }
+
     public function show(Laporan $laporan)
     {
-        //
+        if (! $this->canAccessReport($laporan)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $payload = $this->reportPayload($laporan, $this->hasStaffAccess());
+
+        return response()->json([
+            'data' => $payload,
+            'message' => 'Detail laporan berhasil diambil',
+        ]);
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Laporan $laporan)
+    public function toggleIdentity(Laporan $laporan)
     {
-        //
+        if (Auth::user()?->role !== 'santri' || (int) $laporan->users_id !== (int) Auth::id()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $laporan->update([
+            'tampilkan_identitas' => ! $laporan->tampilkan_identitas,
+        ]);
+
+        return response()->json([
+            'message' => 'Status tampilan identitas berhasil diubah',
+            'laporan' => $laporan->fresh(),
+        ]);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, Laporan $laporan)
+    public function updateStatus(Request $request, Laporan $laporan)
     {
-        //
+        if (! $this->hasStaffAccess()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'status' => ['required', 'in:baru,diproses,selesai'],
+        ]);
+
+        $laporan->update([
+            'status' => $request->status,
+        ]);
+
+        return response()->json([
+            'message' => 'Status laporan berhasil diubah',
+            'laporan' => $laporan->fresh(),
+        ]);
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Laporan $laporan)
+    public function escalate(Request $request, Laporan $laporan)
     {
-        //
+        if (! $this->hasStaffAccess()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'tujuan' => ['required', 'string', 'max:255'],
+            'keterangan' => ['nullable', 'string'],
+        ]);
+
+        $note = trim(sprintf('Eskalasi ke %s%s', $request->tujuan, $request->keterangan ? ': '.$request->keterangan : ''));
+
+        Catatan::create([
+            'catatan' => $note,
+            'users_id' => Auth::id(),
+            'laporan_id' => $laporan->id,
+        ]);
+
+        $laporan->update(['status' => 'diproses']);
+
+        return response()->json([
+            'message' => 'Eskalasi berhasil dicatat',
+            'laporan' => $laporan->fresh(),
+        ]);
+    }
+
+    public function messages(Laporan $laporan)
+    {
+        if (! $this->canAccessReport($laporan)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        return response()->json([
+            'data' => $laporan->percakapans()
+                ->with('pengirim')
+                ->latest()
+                ->get()
+                ->map(fn (Percakapan $message) => $this->messagePayload(
+                    $message,
+                    $laporan,
+                    $laporan->tampilkan_identitas || (int) $laporan->users_id === (int) Auth::id(),
+                )),
+            'message' => 'Daftar pesan berhasil diambil',
+        ]);
+    }
+
+    public function sendMessage(Request $request, Laporan $laporan)
+    {
+        if (! $this->canAccessReport($laporan)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'isi' => ['required', 'string'],
+        ]);
+
+        $message = Percakapan::create([
+            'isi' => $request->isi,
+            'pengirim_id' => Auth::id(),
+            'laporan_id' => $laporan->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Pesan berhasil dikirim',
+            'data' => $this->messagePayload(
+                $message->load('pengirim'),
+                $laporan,
+                $laporan->tampilkan_identitas || (int) $laporan->users_id === (int) Auth::id(),
+            ),
+        ], 201);
+    }
+
+    public function addNote(Request $request, Laporan $laporan)
+    {
+        if (! $this->hasStaffAccess()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'catatan' => ['required', 'string'],
+        ]);
+
+        $note = Catatan::create([
+            'catatan' => $request->catatan,
+            'users_id' => Auth::id(),
+            'laporan_id' => $laporan->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Catatan internal berhasil ditambahkan',
+            'data' => $note->load('user'),
+        ], 201);
+    }
+
+    private function generateNoLaporan(): string
+    {
+        $date = now()->format('Ymd');
+        $sequence = Laporan::whereDate('waktu', now()->toDateString())->count() + 1;
+
+        return 'LAP-'.$date.'-'.str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
     }
 }

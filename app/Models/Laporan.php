@@ -6,7 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class Laporan extends Model
 {
+    protected $table = 'laporans';
+
     protected $fillable = [
+        'users_id',
         'no_laporan',
         'kategori',
         'isi',
@@ -20,6 +23,11 @@ class Laporan extends Model
         'waktu' => 'datetime',
         'status' => 'string',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'users_id');
+    }
 
     public function catatans()
     {

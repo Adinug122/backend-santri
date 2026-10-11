@@ -1,0 +1,200 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Laporan;
+use App\Models\Santri;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Laravel\Sanctum\Sanctum;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Tests\TestCase;
+
+class DashboardAndSantriImportTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_pimpinan_can_get_dashboard_summary_aggregates(): void
+    {
+        $pimpinan = $this->createUser('pimpinan', 'pimpinan@example.test');
+        $santri = $this->createUser('santri', 'santri@example.test');
+        Santri::create([
+            'users_id' => $santri->id,
+            'nis' => '20260001',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+        $this->createReport($santri, 'baru', 'Fasilitas');
+        $this->createReport($santri, 'diproses', 'Keamanan');
+        Sanctum::actingAs($pimpinan);
+
+        $this->getJson('/api/dashboard/summary')
+            ->assertOk()
+            ->assertJsonPath('data.total_santri', 1)
+            ->assertJsonPath('data.total_laporan', 2)
+            ->assertJsonPath('data.laporan_per_status.baru', 1)
+            ->assertJsonPath('data.laporan_per_status.diproses', 1)
+            ->assertJsonPath('data.laporan_per_status.selesai', 0)
+            ->assertJsonPath('data.laporan_per_kategori.0.kategori', 'Fasilitas')
+            ->assertJsonPath('data.laporan_per_kategori.0.total', 1);
+    }
+
+    public function test_non_pimpinan_cannot_get_dashboard_summary(): void
+    {
+        Sanctum::actingAs($this->createUser('pengurus', 'pengurus@example.test'));
+
+        $this->getJson('/api/dashboard/summary')->assertForbidden();
+    }
+
+    public function test_pimpinan_can_download_excel_template(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->get('/api/admin/santri/template')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->assertHeader('content-disposition', 'attachment; filename=template-import-santri.xlsx');
+    }
+
+    public function test_non_pimpinan_cannot_access_santri_import_endpoints(): void
+    {
+        Sanctum::actingAs($this->createUser('pengurus', 'pengurus@example.test'));
+
+        $this->getJson('/api/admin/santri/template')->assertForbidden();
+        $this->postJson('/api/admin/santri/import')->assertForbidden();
+    }
+
+    public function test_import_preview_does_not_save_and_import_saves_valid_rows(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $makeFile = fn () => $this->createWorkbook([
+            ['Siti Test', 'siti.test@example.test', '20260002', 'perempuan', '081234567891', 'TempPassword123'],
+        ]);
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'preview',
+            'file' => $makeFile(),
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonPath('can_import', true)
+            ->assertJsonPath('data.0.nis', '20260002')
+            ->assertJsonMissingPath('data.0.password');
+
+        $this->assertDatabaseMissing('santris', ['nis' => '20260002']);
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $makeFile(),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('imported', 1);
+
+        $this->assertDatabaseHas('santris', [
+            'nis' => '20260002',
+            'jenis_kelamin' => 'perempuan',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'email' => 'siti.test@example.test',
+            'role' => 'santri',
+            'must_change_password' => true,
+        ]);
+    }
+
+    public function test_import_rejects_invalid_rows_without_creating_any_users(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['Invalid Email', 'Bukan Email', '20260003', 'perempuan', '081234567892', 'TempPassword123'],
+            ]),
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.0.row', 2);
+
+        $this->assertDatabaseMissing('santris', ['nis' => '20260003']);
+        $this->assertDatabaseMissing('users', ['email' => 'Bukan Email']);
+    }
+
+    public function test_imported_santri_must_change_temporary_password_before_using_protected_apis(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['Password Test', 'password.test@example.test', '20260004', 'laki', '081234567893', 'TempPassword123'],
+            ]),
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        $santri = User::where('email', 'password.test@example.test')->firstOrFail();
+        Sanctum::actingAs($santri);
+
+        $this->getJson('/api/reports/mine')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
+
+        $this->postJson('/api/auth/password', [
+            'current_password' => 'TempPassword123',
+            'password' => 'NewSecurePassword123',
+            'password_confirmation' => 'NewSecurePassword123',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $santri->id,
+            'must_change_password' => false,
+        ]);
+
+        $this->getJson('/api/reports/mine')->assertOk();
+    }
+
+    private function createUser(string $role, string $email): User
+    {
+        return User::create([
+            'name' => ucfirst($role).' Test',
+            'email' => $email,
+            'role' => $role,
+            'password' => 'password123',
+            'is_active' => true,
+        ]);
+    }
+
+    private function createReport(User $owner, string $status, string $category): Laporan
+    {
+        static $sequence = 0;
+        $sequence++;
+
+        return Laporan::create([
+            'users_id' => $owner->id,
+            'no_laporan' => 'LAP-DASH-'.$sequence,
+            'kategori' => $category,
+            'isi' => 'Contoh laporan.',
+            'tampilkan_identitas' => false,
+            'status' => $status,
+            'waktu' => now(),
+        ]);
+    }
+
+    private function createWorkbook(array $dataRows): UploadedFile
+    {
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->fromArray([
+            ['name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password'],
+            ...$dataRows,
+        ]);
+
+        $path = tempnam(sys_get_temp_dir(), 'santri-import-');
+        (new Xlsx($spreadsheet))->save($path);
+        $spreadsheet->disconnectWorksheets();
+        $uploadedFile = UploadedFile::fake()->createWithContent(
+            'santri-import.xlsx',
+            file_get_contents($path),
+        );
+        unlink($path);
+
+        return $uploadedFile;
+    }
+}

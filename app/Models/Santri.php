@@ -6,8 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class Santri extends Model
 {
+    protected $table = 'santris';
+
     protected $fillable = [
         'users_id',
+        'nis',
         'jenis_kelamin',
         'telepon_ortu',
     ];

@@ -53,12 +53,14 @@ class DatabaseSeeder extends Seeder
         // --- Santris ---
         Santri::create([
             'users_id'      => $santriUser1->id,
+            'nis'           => '2024001',
             'jenis_kelamin' => 'laki',
             'telepon_ortu'  => '081234567890',
         ]);
 
         Santri::create([
             'users_id'      => $santriUser2->id,
+            'nis'           => '2024002',
             'jenis_kelamin' => 'perempuan',
             'telepon_ortu'  => '089876543210',
         ]);
