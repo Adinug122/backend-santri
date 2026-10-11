@@ -20,7 +20,7 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [UserController::class, 'logout']);
 });
-
+// test auto deploy
 Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(function () {
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
     Route::get('/admin/santri/template', [SantriImportController::class, 'template']);
