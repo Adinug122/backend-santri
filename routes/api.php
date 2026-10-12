@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\SantriController;
 use App\Http\Controllers\SantriImportController;
 use App\Http\Controllers\UserController;
@@ -20,9 +20,12 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [UserController::class, 'logout']);
 });
+
 // test auto deploy
 Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(function () {
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+    Route::get('/admin/accounts', [DashboardController::class, 'account']);
+    Route::patch('/admin/accounts/{user}/status', [DashboardController::class, 'isActiveAccount'])->whereNumber('user');
     Route::get('/admin/santri/template', [SantriImportController::class, 'template']);
     Route::post('/admin/santri/import', [SantriImportController::class, 'import']);
 

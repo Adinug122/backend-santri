@@ -48,6 +48,71 @@ class DashboardAndSantriImportTest extends TestCase
         $this->getJson('/api/dashboard/summary')->assertForbidden();
     }
 
+    public function test_pimpinan_can_list_accounts_without_exposing_passwords(): void
+    {
+        $pimpinan = $this->createUser('pimpinan', 'pimpinan@example.test');
+        $this->createUser('santri', 'santri@example.test');
+        Sanctum::actingAs($pimpinan);
+
+        $this->getJson('/api/admin/accounts')
+            ->assertOk()
+            ->assertJsonPath('data.1.email', 'santri@example.test')
+            ->assertJsonPath('data.1.is_active', true)
+            ->assertJsonMissingPath('data.1.password');
+    }
+
+    public function test_non_pimpinan_cannot_list_or_toggle_accounts(): void
+    {
+        $pengurus = $this->createUser('pengurus', 'pengurus@example.test');
+        $santri = $this->createUser('santri', 'santri@example.test');
+        Sanctum::actingAs($pengurus);
+
+        $this->getJson('/api/admin/accounts')->assertForbidden();
+        $this->patchJson("/api/admin/accounts/{$santri->id}/status")->assertForbidden();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $santri->id,
+            'is_active' => true,
+        ]);
+    }
+
+    public function test_pimpinan_can_toggle_account_and_deactivation_revokes_its_tokens(): void
+    {
+        $pimpinan = $this->createUser('pimpinan', 'pimpinan@example.test');
+        $santri = $this->createUser('santri', 'santri@example.test');
+        $token = $santri->createToken('existing-session');
+        Sanctum::actingAs($pimpinan);
+
+        $this->patchJson("/api/admin/accounts/{$santri->id}/status")
+            ->assertOk()
+            ->assertJsonPath('data.is_active', false);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $santri->id,
+            'is_active' => false,
+        ]);
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'id' => $token->accessToken->id,
+        ]);
+    }
+
+    public function test_pimpinan_cannot_deactivate_themselves_or_the_last_active_pimpinan(): void
+    {
+        $pimpinan = $this->createUser('pimpinan', 'pimpinan@example.test');
+        $secondPimpinan = $this->createUser('pimpinan', 'pimpinan2@example.test');
+        Sanctum::actingAs($pimpinan);
+
+        $this->patchJson("/api/admin/accounts/{$pimpinan->id}/status")->assertUnprocessable();
+
+        $secondPimpinan->update(['is_active' => false]);
+        $this->patchJson("/api/admin/accounts/{$pimpinan->id}/status")->assertUnprocessable();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $pimpinan->id,
+            'is_active' => true,
+        ]);
+    }
+
     public function test_pimpinan_can_download_excel_template(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));

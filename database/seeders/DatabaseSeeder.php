@@ -50,20 +50,63 @@ class DatabaseSeeder extends Seeder
             'is_active' => true,
         ]);
 
-        // --- Santris ---
-        Santri::create([
-            'users_id'      => $santriUser1->id,
-            'nis'           => '2024001',
-            'jenis_kelamin' => 'laki',
-            'telepon_ortu'  => '081234567890',
-        ]);
+        $reactPimpinan = User::firstOrCreate(
+            ['email' => 'react.pimpinan@santri.test'],
+            [
+                'name'      => 'React Pimpinan',
+                'password'  => Hash::make('password'),
+                'role'      => 'pimpinan',
+                'is_active' => true,
+            ]
+        );
 
-        Santri::create([
-            'users_id'      => $santriUser2->id,
-            'nis'           => '2024002',
-            'jenis_kelamin' => 'perempuan',
-            'telepon_ortu'  => '089876543210',
-        ]);
+        $reactPengurus = User::firstOrCreate(
+            ['email' => 'react.pengurus@santri.test'],
+            [
+                'name'      => 'React Pengurus',
+                'password'  => Hash::make('password'),
+                'role'      => 'pengurus',
+                'is_active' => true,
+            ]
+        );
+
+        $reactSantriUser = User::firstOrCreate(
+            ['email' => 'react.santri@santri.test'],
+            [
+                'name'      => 'React Santri',
+                'password'  => Hash::make('password'),
+                'role'      => 'santri',
+                'is_active' => true,
+            ]
+        );
+
+        // --- Santris ---
+        Santri::firstOrCreate(
+            ['users_id' => $santriUser1->id],
+            [
+                'nis'           => '2024001',
+                'jenis_kelamin' => 'laki',
+                'telepon_ortu'  => '081234567890',
+            ]
+        );
+
+        Santri::firstOrCreate(
+            ['users_id' => $santriUser2->id],
+            [
+                'nis'           => '2024002',
+                'jenis_kelamin' => 'perempuan',
+                'telepon_ortu'  => '089876543210',
+            ]
+        );
+
+        Santri::firstOrCreate(
+            ['users_id' => $reactSantriUser->id],
+            [
+                'nis'           => '2024100',
+                'jenis_kelamin' => 'laki',
+                'telepon_ortu'  => '081111223344',
+            ]
+        );
 
         // --- Laporans ---
         $laporan1 = Laporan::create([

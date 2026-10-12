@@ -66,6 +66,8 @@ Logout is available at `POST /api/auth/logout`.
 The dashboard and santri import endpoints require a Bearer token from a `pimpinan` account:
 
 - `GET /api/dashboard/summary` returns santri and report totals grouped by status and category.
+- `GET /api/admin/accounts` lists account details without exposing passwords.
+- `PATCH /api/admin/accounts/{userId}/status` toggles an account's active status. Deactivating an account revokes its tokens; the current and last active pimpinan accounts cannot be deactivated.
 - `GET /api/admin/santri/template` downloads the Excel template.
 - `POST /api/admin/santri/import` accepts an `.xlsx` file and an `action` of `preview` or `import`. Preview does not save data; import revalidates the uploaded workbook and saves only if every non-empty row is valid. Upload the same workbook again with `action=import` after reviewing the preview.
 
