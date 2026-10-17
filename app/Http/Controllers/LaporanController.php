@@ -351,7 +351,7 @@ class LaporanController extends Controller
 
         $validated = $request->validate([
             'alasan' => ['required', 'string', 'max:2000'],
-            'bukti' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+            'bukti' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
         ]);
 
         $evidencePath = $request->file('bukti')->store('identity-requests', 'local');
@@ -360,6 +360,7 @@ class LaporanController extends Controller
             abort(500, 'Bukti permintaan identitas gagal disimpan.');
         }
 
+        try{
         $identityRequest = IdentityRequest::create([
             'laporan_id' => $laporan->id,
             'users_id' => Auth::id(),
@@ -372,6 +373,13 @@ class LaporanController extends Controller
             'message' => 'Permintaan identitas berhasil diajukan',
             'data' => $identityRequest,
         ], 201);
+        
+        }catch(Exception $error){
+            return response()->json([
+                'message' => 'Gagal mengajukan permintaan identitas',
+                'error' => $error->getMessage()
+            ], 500);
+        }
     }
 
     public function respondToIdentityRequest(Request $request, Laporan $laporan): JsonResponse
