@@ -6,11 +6,14 @@ use App\Models\Catatan;
 use App\Models\IdentityRequest;
 use App\Models\Laporan;
 use App\Models\Percakapan;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+
+use function Laravel\Prompts\error;
 
 class LaporanController extends Controller
 {
@@ -145,20 +148,28 @@ class LaporanController extends Controller
             'tampilkan_identitas' => ['nullable', 'boolean'],
         ]);
 
-        $laporan = Laporan::create([
-            'users_id' => Auth::id(),
-            'no_laporan' => $this->generateNoLaporan(),
-            'kategori' => $request->kategori,
-            'isi' => $request->isi,
-            'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
-            'status' => 'baru',
-            'waktu' => now(),
-        ]);
-
+        try{
+                    $laporan = Laporan::create([
+                        'users_id' => Auth::id(),
+                        'no_laporan' => $this->generateNoLaporan(),
+                        'kategori' => $request->kategori,
+                        'isi' => $request->isi,
+                        'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
+                        'status' => 'baru',
+                        'waktu' => now(),
+                    ]);
+            
+                    return response()->json([
+                        'message' => 'Laporan berhasil dibuat',
+                        'laporan' => $laporan,
+                    ], 201);
+           } catch (\Exception $error) {
+        // Return response gagal (500 Internal Server Error)
         return response()->json([
-            'message' => 'Laporan berhasil dibuat',
-            'laporan' => $laporan,
-        ], 201);
+            'message' => 'Gagal menyimpan laporan',
+            'error' => $error->getMessage()
+        ], 500);
+    }
     }
 
     public function mine()
@@ -376,6 +387,7 @@ class LaporanController extends Controller
             'status' => ['required', 'in:disetujui,ditolak'],
         ]);
 
+        try{
         DB::transaction(function () use ($laporan, $validated): void {
             $identityRequest = $laporan->identityRequests()
                 ->where('status', 'menunggu')
@@ -399,5 +411,11 @@ class LaporanController extends Controller
                 : 'Permintaan identitas ditolak',
             'data' => $this->reportPayload($laporan->fresh(), false),
         ]);
+           }catch(Exception $error){
+            return response()->json([
+                'message' => 'Gagal merespons permintaan identitas',
+                'error' => $error->getMessage()
+            ], 500);
+        }
     }
 }
