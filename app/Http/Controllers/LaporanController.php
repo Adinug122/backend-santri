@@ -398,9 +398,11 @@ class LaporanController extends Controller
         }
 
         $validated = $request->validate([
-            'status' => ['required', 'in:disetujui,ditolak'],
+            'status' => ['required', 'in:disetujui,ditolak,1,0'],
         ]);
-        $identityStatus = $validated['status'];
+        $identityStatus = in_array((string) $validated['status'], ['1', 'disetujui'], true)
+            ? 'disetujui'
+            : 'ditolak';
 
         try {
             DB::transaction(function () use ($laporan, $identityStatus): void {

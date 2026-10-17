@@ -223,6 +223,39 @@ class ReportApiTest extends TestCase
         ]);
     }
 
+    public function test_identity_request_response_accepts_numeric_status_values_and_stores_table_statuses(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $approvedReport = $this->createReport($santri);
+        $rejectedReport = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+        $this->submitIdentityRequest($approvedReport, $pimpinan);
+        $this->submitIdentityRequest($rejectedReport, $pimpinan);
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$approvedReport->id}/identity-request", [
+            'status' => '1',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas.status', 'disetujui');
+
+        $this->patchJson("/api/reports/{$rejectedReport->id}/identity-request", [
+            'status' => '0',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas.status', 'ditolak');
+
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $approvedReport->id,
+            'status' => 'disetujui',
+        ]);
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $rejectedReport->id,
+            'status' => 'ditolak',
+        ]);
+    }
+
     public static function usersWhoCannotRespondToIdentityRequests(): array
     {
         return [
