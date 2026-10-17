@@ -32,6 +32,8 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::post('/reports', [LaporanController::class, 'store']);
     Route::get('/reports/mine', [LaporanController::class, 'mine']);
     Route::patch('/reports/{laporan}/identity', [LaporanController::class, 'toggleIdentity'])->whereNumber('laporan');
+    Route::post('/reports/{laporan}/identity-request', [LaporanController::class, 'identityRequest'])->whereNumber('laporan');
+    Route::patch('/reports/{laporan}/identity-request', [LaporanController::class, 'respondToIdentityRequest'])->whereNumber('laporan');
     Route::get('/reports', [LaporanController::class, 'index']);
     Route::get('/reports/{laporan}', [LaporanController::class, 'show'])->whereNumber('laporan');
     Route::patch('/reports/{laporan}/status', [LaporanController::class, 'updateStatus'])->whereNumber('laporan');

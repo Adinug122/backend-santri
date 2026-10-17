@@ -43,7 +43,6 @@ class SantriImportController extends Controller
                 ['Isi kolom password dengan password sementara; santri wajib menggantinya setelah login.'],
             ], null, 'A4');
             $sheet->getStyle('A1:F1')->getFont()->setBold(true);
-
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
         }, 'template-import-santri.xlsx', [

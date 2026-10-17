@@ -3,10 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Catatan;
+use App\Models\IdentityRequest;
 use App\Models\Laporan;
 use App\Models\Percakapan;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class LaporanController extends Controller
 {
@@ -48,12 +52,15 @@ class LaporanController extends Controller
     {
         $laporan->loadMissing([
             'user',
+            'latestIdentityRequest',
             'percakapans.pengirim',
             ...($includeInternalNotes ? ['catatans.user'] : []),
         ]);
 
         $payload = $laporan->toArray();
+        unset($payload['latest_identity_request']);
         $payload['user'] = $this->maskedUserPayload($laporan);
+        $payload['permintaan_identitas'] = $this->identityRequestPayload($laporan->latestIdentityRequest);
         $ownerId = (int) $laporan->users_id;
         $identityVisible = $laporan->tampilkan_identitas
             || $ownerId === (int) Auth::id();
@@ -68,6 +75,23 @@ class LaporanController extends Controller
         }
 
         return $payload;
+    }
+
+    private function identityRequestPayload(?IdentityRequest $identityRequest): ?array
+    {
+        if (! $identityRequest) {
+            return null;
+        }
+
+        return [
+            'status' => $identityRequest->status,
+            'alasan' => $identityRequest->alasan,
+            'bukti_url' => Storage::disk('local')->temporaryUrl(
+                $identityRequest->bukti_path,
+                now()->addMinutes(15),
+            ),
+            'waktu' => $identityRequest->created_at,
+        ];
     }
 
     private function messagePayload(
@@ -98,7 +122,7 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $laporans = Laporan::with(['user', 'catatans.user', 'percakapans.pengirim'])
+        $laporans = Laporan::with(['user', 'catatans.user', 'latestIdentityRequest', 'percakapans.pengirim'])
             ->latest()
             ->get()
             ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, true));
@@ -144,7 +168,7 @@ class LaporanController extends Controller
         }
 
         $laporans = Laporan::where('users_id', Auth::id())
-            ->with(['user', 'percakapans.pengirim'])
+            ->with(['user', 'latestIdentityRequest', 'percakapans.pengirim'])
             ->latest()
             ->get()
             ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, false));
@@ -306,5 +330,74 @@ class LaporanController extends Controller
         $sequence = Laporan::whereDate('waktu', now()->toDateString())->count() + 1;
 
         return 'LAP-'.$date.'-'.str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    public function identityRequest(Request $request, Laporan $laporan): JsonResponse
+    {
+        if (Auth::user()?->role !== 'pimpinan') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'alasan' => ['required', 'string', 'max:2000'],
+            'bukti' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+        ]);
+
+        $evidencePath = $request->file('bukti')->store('identity-requests', 'local');
+
+        if (! $evidencePath) {
+            abort(500, 'Bukti permintaan identitas gagal disimpan.');
+        }
+
+        $identityRequest = IdentityRequest::create([
+            'laporan_id' => $laporan->id,
+            'users_id' => Auth::id(),
+            'alasan' => $validated['alasan'],
+            'bukti_path' => $evidencePath,
+            'status' => 'menunggu',
+        ]);
+
+        return response()->json([
+            'message' => 'Permintaan identitas berhasil diajukan',
+            'data' => $identityRequest,
+        ], 201);
+    }
+
+    public function respondToIdentityRequest(Request $request, Laporan $laporan): JsonResponse
+    {
+        if (
+            Auth::user()?->role !== 'santri'
+            || (int) $laporan->users_id !== (int) Auth::id()
+        ) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'status' => ['required', 'in:disetujui,ditolak'],
+        ]);
+
+        DB::transaction(function () use ($laporan, $validated): void {
+            $identityRequest = $laporan->identityRequests()
+                ->where('status', 'menunggu')
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $identityRequest) {
+                abort(404, 'Tidak ada permintaan identitas yang menunggu persetujuan.');
+            }
+
+            $identityRequest->update(['status' => $validated['status']]);
+            $laporan->update([
+                'tampilkan_identitas' => $validated['status'] === 'disetujui',
+            ]);
+        });
+
+        return response()->json([
+            'message' => $validated['status'] === 'disetujui'
+                ? 'Permintaan identitas disetujui'
+                : 'Permintaan identitas ditolak',
+            'data' => $this->reportPayload($laporan->fresh(), false),
+        ]);
     }
 }

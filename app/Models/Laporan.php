@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Laporan extends Model
 {
@@ -32,6 +33,16 @@ class Laporan extends Model
     public function catatans()
     {
         return $this->hasMany(Catatan::class, 'laporan_id');
+    }
+
+    public function identityRequests()
+    {
+        return $this->hasMany(IdentityRequest::class, 'laporan_id');
+    }
+
+    public function latestIdentityRequest(): HasOne
+    {
+        return $this->hasOne(IdentityRequest::class, 'laporan_id')->latestOfMany();
     }
 
     public function percakapans()
