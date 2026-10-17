@@ -400,9 +400,10 @@ class LaporanController extends Controller
         $validated = $request->validate([
             'status' => ['required', 'in:disetujui,ditolak'],
         ]);
+        $identityStatus = $validated['status'];
 
         try {
-            DB::transaction(function () use ($laporan, $validated): void {
+            DB::transaction(function () use ($laporan, $identityStatus): void {
                 $identityRequest = $laporan->identityRequests()
                     ->where('status', 'menunggu')
                     ->latest('id')
@@ -413,14 +414,14 @@ class LaporanController extends Controller
                     abort(404, 'Tidak ada permintaan identitas yang menunggu persetujuan.');
                 }
 
-                $identityRequest->update(['status' => $validated['status']]);
+                $identityRequest->update(['status' => $identityStatus]);
                 $laporan->update([
-                    'tampilkan_identitas' => $validated['status'] === 'disetujui',
+                    'tampilkan_identitas' => $identityStatus === 'disetujui',
                 ]);
             });
 
             return response()->json([
-                'message' => $validated['status'] === 'disetujui'
+                'message' => $identityStatus === 'disetujui'
                     ? 'Permintaan identitas disetujui'
                     : 'Permintaan identitas ditolak',
                 'data' => $this->reportPayload($laporan->fresh(), false),
