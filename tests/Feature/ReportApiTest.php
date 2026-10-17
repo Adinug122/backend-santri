@@ -137,7 +137,9 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('data.laporan_id', $report->id)
             ->assertJsonPath('data.users_id', $pimpinan->id)
             ->assertJsonPath('data.status', 'menunggu')
-            ->assertJsonPath('data.alasan', 'Diperlukan untuk pemeriksaan lanjutan.');
+            ->assertJsonPath('data.alasan', 'Diperlukan untuk pemeriksaan lanjutan.')
+            ->assertJsonPath('laporan.user.name', 'Anonymous')
+            ->assertJsonPath('laporan.permintaan_identitas.status', 'menunggu');
 
         $identityRequest = IdentityRequest::query()->sole();
         $this->assertDatabaseHas('identity_requests', [
@@ -164,6 +166,7 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('message', 'Permintaan identitas disetujui')
             ->assertJsonStructure([
                 'data' => [
+                    'user' => ['name'],
                     'permintaan_identitas' => [
                         'status',
                         'alasan',
@@ -172,6 +175,7 @@ class ReportApiTest extends TestCase
                     ],
                 ],
             ])
+            ->assertJsonPath('data.user.name', $santri->name)
             ->assertJsonPath('data.permintaan_identitas.status', 'disetujui')
             ->assertJsonPath('data.permintaan_identitas.alasan', 'Diperlukan untuk pemeriksaan lanjutan.');
 
@@ -186,6 +190,7 @@ class ReportApiTest extends TestCase
 
         $reportResponse = $this->getJson("/api/reports/{$report->id}")
             ->assertOk()
+            ->assertJsonPath('data.user.name', $santri->name)
             ->assertJsonPath('data.permintaan_identitas.status', 'disetujui');
 
         $evidenceUrl = $reportResponse->json('data.permintaan_identitas.bukti_url');
@@ -410,6 +415,67 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('data.user.name', 'Anonymous')
             ->assertJsonMissingPath('data.user.email')
             ->assertJsonPath('data.percakapans.0.pengirim.name', 'Anonymous');
+    }
+
+    public function test_santri_can_set_identity_visibility_and_staff_sees_the_updated_name(): void
+    {
+        $owner = $this->createUser('santri');
+        $report = $this->createReport($owner);
+        Sanctum::actingAs($owner);
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('laporan.tampilkan_identitas', true)
+            ->assertJsonPath('laporan.user.name', $owner->name);
+
+        $this->assertDatabaseHas('laporans', [
+            'id' => $report->id,
+            'tampilkan_identitas' => true,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.user.name', $owner->name);
+
+        Sanctum::actingAs($owner);
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('laporan.tampilkan_identitas', false);
+
+        $this->assertDatabaseHas('laporans', [
+            'id' => $report->id,
+            'tampilkan_identitas' => false,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.user.name', 'Anonymous');
+    }
+
+    public function test_santri_can_toggle_identity_visibility_without_a_request_body(): void
+    {
+        $owner = $this->createUser('santri');
+        $report = $this->createReport($owner);
+        Sanctum::actingAs($owner);
+
+        $this->patchJson("/api/reports/{$report->id}/identity")
+            ->assertOk()
+            ->assertJsonPath('laporan.tampilkan_identitas', true)
+            ->assertJsonPath('laporan.user.name', $owner->name);
+
+        $this->assertDatabaseHas('laporans', [
+            'id' => $report->id,
+            'tampilkan_identitas' => true,
+        ]);
     }
 
     public function test_santri_report_details_do_not_include_internal_notes(): void

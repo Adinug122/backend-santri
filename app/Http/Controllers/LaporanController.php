@@ -148,28 +148,28 @@ class LaporanController extends Controller
             'tampilkan_identitas' => ['nullable', 'boolean'],
         ]);
 
-        try{
-                    $laporan = Laporan::create([
-                        'users_id' => Auth::id(),
-                        'no_laporan' => $this->generateNoLaporan(),
-                        'kategori' => $request->kategori,
-                        'isi' => $request->isi,
-                        'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
-                        'status' => 'baru',
-                        'waktu' => now(),
-                    ]);
-            
-                    return response()->json([
-                        'message' => 'Laporan berhasil dibuat',
-                        'laporan' => $laporan,
-                    ], 201);
-           } catch (\Exception $error) {
-        // Return response gagal (500 Internal Server Error)
-        return response()->json([
-            'message' => 'Gagal menyimpan laporan',
-            'error' => $error->getMessage()
-        ], 500);
-    }
+        try {
+            $laporan = Laporan::create([
+                'users_id' => Auth::id(),
+                'no_laporan' => $this->generateNoLaporan(),
+                'kategori' => $request->kategori,
+                'isi' => $request->isi,
+                'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
+                'status' => 'baru',
+                'waktu' => now(),
+            ]);
+
+            return response()->json([
+                'message' => 'Laporan berhasil dibuat',
+                'laporan' => $laporan,
+            ], 201);
+        } catch (Exception $error) {
+            // Return response gagal (500 Internal Server Error)
+            return response()->json([
+                'message' => 'Gagal menyimpan laporan',
+                'error' => $error->getMessage(),
+            ], 500);
+        }
     }
 
     public function mine()
@@ -204,19 +204,24 @@ class LaporanController extends Controller
         ]);
     }
 
-    public function toggleIdentity(Laporan $laporan)
+    public function toggleIdentity(Request $request, Laporan $laporan): JsonResponse
     {
         if (Auth::user()?->role !== 'santri' || (int) $laporan->users_id !== (int) Auth::id()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $validated = $request->validate([
+            'tampilkan_identitas' => ['sometimes', 'required', 'boolean'],
+        ]);
+
         $laporan->update([
-            'tampilkan_identitas' => ! $laporan->tampilkan_identitas,
+            'tampilkan_identitas' => $validated['tampilkan_identitas']
+                ?? ! $laporan->tampilkan_identitas,
         ]);
 
         return response()->json([
             'message' => 'Status tampilan identitas berhasil diubah',
-            'laporan' => $laporan->fresh(),
+            'laporan' => $this->reportPayload($laporan->fresh(), false),
         ]);
     }
 
@@ -351,7 +356,7 @@ class LaporanController extends Controller
 
         $validated = $request->validate([
             'alasan' => ['required', 'string', 'max:2000'],
-            'bukti' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+            'bukti' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
         ]);
 
         $evidencePath = $request->file('bukti')->store('identity-requests', 'local');
@@ -360,24 +365,25 @@ class LaporanController extends Controller
             abort(500, 'Bukti permintaan identitas gagal disimpan.');
         }
 
-        try{
-        $identityRequest = IdentityRequest::create([
-            'laporan_id' => $laporan->id,
-            'users_id' => Auth::id(),
-            'alasan' => $validated['alasan'],
-            'bukti_path' => $evidencePath,
-            'status' => 'menunggu',
-        ]);
+        try {
+            $identityRequest = IdentityRequest::create([
+                'laporan_id' => $laporan->id,
+                'users_id' => Auth::id(),
+                'alasan' => $validated['alasan'],
+                'bukti_path' => $evidencePath,
+                'status' => 'menunggu',
+            ]);
 
-        return response()->json([
-            'message' => 'Permintaan identitas berhasil diajukan',
-            'data' => $identityRequest,
-        ], 201);
-        
-        }catch(Exception $error){
+            return response()->json([
+                'message' => 'Permintaan identitas berhasil diajukan',
+                'data' => $identityRequest,
+                'laporan' => $this->reportPayload($laporan->fresh(), false),
+            ], 201);
+
+        } catch (Exception $error) {
             return response()->json([
                 'message' => 'Gagal mengajukan permintaan identitas',
-                'error' => $error->getMessage()
+                'error' => $error->getMessage(),
             ], 500);
         }
     }
@@ -395,34 +401,34 @@ class LaporanController extends Controller
             'status' => ['required', 'in:disetujui,ditolak'],
         ]);
 
-        try{
-        DB::transaction(function () use ($laporan, $validated): void {
-            $identityRequest = $laporan->identityRequests()
-                ->where('status', 'menunggu')
-                ->latest('id')
-                ->lockForUpdate()
-                ->first();
+        try {
+            DB::transaction(function () use ($laporan, $validated): void {
+                $identityRequest = $laporan->identityRequests()
+                    ->where('status', 'menunggu')
+                    ->latest('id')
+                    ->lockForUpdate()
+                    ->first();
 
-            if (! $identityRequest) {
-                abort(404, 'Tidak ada permintaan identitas yang menunggu persetujuan.');
-            }
+                if (! $identityRequest) {
+                    abort(404, 'Tidak ada permintaan identitas yang menunggu persetujuan.');
+                }
 
-            $identityRequest->update(['status' => $validated['status']]);
-            $laporan->update([
-                'tampilkan_identitas' => $validated['status'] === 'disetujui',
+                $identityRequest->update(['status' => $validated['status']]);
+                $laporan->update([
+                    'tampilkan_identitas' => $validated['status'] === 'disetujui',
+                ]);
+            });
+
+            return response()->json([
+                'message' => $validated['status'] === 'disetujui'
+                    ? 'Permintaan identitas disetujui'
+                    : 'Permintaan identitas ditolak',
+                'data' => $this->reportPayload($laporan->fresh(), false),
             ]);
-        });
-
-        return response()->json([
-            'message' => $validated['status'] === 'disetujui'
-                ? 'Permintaan identitas disetujui'
-                : 'Permintaan identitas ditolak',
-            'data' => $this->reportPayload($laporan->fresh(), false),
-        ]);
-           }catch(Exception $error){
+        } catch (Exception $error) {
             return response()->json([
                 'message' => 'Gagal merespons permintaan identitas',
-                'error' => $error->getMessage()
+                'error' => $error->getMessage(),
             ], 500);
         }
     }
