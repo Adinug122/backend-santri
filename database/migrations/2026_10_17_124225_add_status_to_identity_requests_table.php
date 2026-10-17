@@ -12,21 +12,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('identity_requests', function (Blueprint $table) {
-            Schema::table('identity_requests', function (Blueprint $table) {
-                $table->string('status')->default('menunggu')->after('bukti_path');
-            });
+            $table->string('status')->default('menunggu')->after('bukti_path');
         });
     }
-
+    
     /**
      * Reverse the migrations.
      */
     public function down(): void
     {
         Schema::table('identity_requests', function (Blueprint $table) {
-            Schema::table('identity_requests', function (Blueprint $table) {
-                $table->dropColumn('status');
-            });
+            $table->dropColumn('status');
         });
     }
 };
