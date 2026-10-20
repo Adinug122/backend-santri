@@ -25,6 +25,7 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(function () {
     Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
     Route::get('/admin/accounts', [DashboardController::class, 'account']);
+    Route::post('/admin/accounts', [DashboardController::class, 'storeAccount']);
     Route::patch('/admin/accounts/{user}/status', [DashboardController::class, 'isActiveAccount'])->whereNumber('user');
     Route::get('/admin/santri/template', [SantriImportController::class, 'template']);
     Route::post('/admin/santri/import', [SantriImportController::class, 'import']);

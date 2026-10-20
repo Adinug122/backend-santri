@@ -7,6 +7,7 @@ use App\Models\Santri;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -61,6 +62,113 @@ class DashboardAndSantriImportTest extends TestCase
             ->assertJsonMissingPath('data.1.password');
     }
 
+    public function test_pimpinan_can_create_active_pengurus_account_with_temporary_password(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Baru',
+            'email' => 'pengurus.baru@example.test',
+            'password' => 'TempPassword123',
+            'role' => 'pimpinan',
+            'is_active' => false,
+            'must_change_password' => false,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Pengurus Baru')
+            ->assertJsonPath('data.email', 'pengurus.baru@example.test')
+            ->assertJsonPath('data.role', 'pengurus')
+            ->assertJsonPath('data.is_active', true)
+            ->assertJsonPath('data.must_change_password', true)
+            ->assertJsonMissingPath('data.password');
+
+        $user = User::where('email', 'pengurus.baru@example.test')->firstOrFail();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'role' => 'pengurus',
+            'is_active' => true,
+            'must_change_password' => true,
+        ]);
+        $this->assertTrue(Hash::check('TempPassword123', $user->password));
+    }
+
+    public function test_unauthenticated_request_returns_401_when_creating_pengurus_account(): void
+    {
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Baru',
+            'email' => 'pengurus.baru@example.test',
+            'password' => 'TempPassword123',
+        ])->assertUnauthorized();
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'pengurus.baru@example.test',
+        ]);
+    }
+
+    public function test_account_creation_returns_422_when_required_fields_are_missing(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->postJson('/api/admin/accounts', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['name', 'email', 'password']);
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'pengurus.baru@example.test',
+        ]);
+    }
+
+    public function test_account_creation_returns_422_when_email_is_invalid(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Baru',
+            'email' => 'bukan-email',
+            'password' => 'TempPassword123',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['email']);
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'bukan-email',
+        ]);
+    }
+
+    public function test_account_creation_returns_422_when_email_is_already_used(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $this->createUser('pengurus', 'pengurus.lama@example.test');
+
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Duplikat',
+            'email' => 'pengurus.lama@example.test',
+            'password' => 'TempPassword123',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['email']);
+
+        $this->assertSame(1, User::where('email', 'pengurus.lama@example.test')->count());
+    }
+
+    public function test_account_creation_returns_422_when_password_is_too_short(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Baru',
+            'email' => 'pengurus.baru@example.test',
+            'password' => 'short',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['password']);
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'pengurus.baru@example.test',
+        ]);
+    }
+
     public function test_non_pimpinan_cannot_list_or_toggle_accounts(): void
     {
         $pengurus = $this->createUser('pengurus', 'pengurus@example.test');
@@ -68,8 +176,16 @@ class DashboardAndSantriImportTest extends TestCase
         Sanctum::actingAs($pengurus);
 
         $this->getJson('/api/admin/accounts')->assertForbidden();
+        $this->postJson('/api/admin/accounts', [
+            'name' => 'Pengurus Baru',
+            'email' => 'pengurus.baru@example.test',
+            'password' => 'TempPassword123',
+        ])->assertForbidden();
         $this->patchJson("/api/admin/accounts/{$santri->id}/status")->assertForbidden();
 
+        $this->assertDatabaseMissing('users', [
+            'email' => 'pengurus.baru@example.test',
+        ]);
         $this->assertDatabaseHas('users', [
             'id' => $santri->id,
             'is_active' => true,

@@ -6,6 +6,7 @@ use App\Models\Laporan;
 use App\Models\Santri;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
@@ -73,6 +74,40 @@ class DashboardController extends Controller
             'data' => $accounts,
             'message' => 'Data akun berhasil diambil',
         ]);
+    }
+
+    public function storeAccount(Request $request): JsonResponse
+    {
+        if (Auth::user()?->role !== 'pimpinan') {
+            return response()->json(['message' => 'Unauthorized'], Response::HTTP_FORBIDDEN);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8', 'max:255'],
+        ]);
+
+        $user = User::create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'role' => 'pengurus',
+            'password' => $validated['password'],
+            'is_active' => true,
+            'must_change_password' => true,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'is_active' => $user->is_active,
+                'must_change_password' => $user->must_change_password,
+            ],
+            'message' => 'Akun pengurus berhasil dibuat.',
+        ], Response::HTTP_CREATED);
     }
 
     public function isActiveAccount(User $user): JsonResponse
