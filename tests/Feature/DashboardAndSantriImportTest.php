@@ -331,6 +331,15 @@ class DashboardAndSantriImportTest extends TestCase
         $this->getJson('/api/reports/mine')->assertOk();
     }
 
+    public function test_pengurus_can_use_protected_apis_with_temporary_password_flag(): void
+    {
+        $pengurus = $this->createUser('pengurus', 'pengurus.temporary@example.test');
+        $pengurus->update(['must_change_password' => true]);
+        Sanctum::actingAs($pengurus);
+
+        $this->getJson('/api/reports')->assertOk();
+    }
+
     private function createUser(string $role, string $email): User
     {
         return User::create([

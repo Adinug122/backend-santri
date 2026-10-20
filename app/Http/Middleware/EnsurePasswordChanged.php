@@ -10,7 +10,7 @@ class EnsurePasswordChanged
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if ($request->user()?->must_change_password) {
+        if ($request->user()?->role === 'santri' && $request->user()->must_change_password) {
             return response()->json([
                 'message' => 'Ganti password sementara terlebih dahulu.',
                 'code' => 'PASSWORD_CHANGE_REQUIRED',
