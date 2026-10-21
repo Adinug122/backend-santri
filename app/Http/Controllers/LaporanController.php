@@ -102,10 +102,12 @@ class LaporanController extends Controller
         return [
             'status' => $identityRequest->status,
             'alasan' => $identityRequest->alasan,
-            'bukti_url' => Storage::disk('local')->temporaryUrl(
-                $identityRequest->bukti_path,
-                now()->addMinutes(15),
-            ),
+            'bukti_url' => $identityRequest->bukti_path
+                ? Storage::disk('local')->temporaryUrl(
+                    $identityRequest->bukti_path,
+                    now()->addMinutes(15),
+                )
+                : null,
             'waktu' => $identityRequest->created_at,
         ];
     }
@@ -374,13 +376,17 @@ class LaporanController extends Controller
 
         $validated = $request->validate([
             'alasan' => ['required', 'string', 'max:2000'],
-            'bukti' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
+            'bukti' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
         ]);
 
-        $evidencePath = $request->file('bukti')->store('identity-requests', 'local');
+        $evidencePath = null;
 
-        if (! $evidencePath) {
-            abort(500, 'Bukti permintaan identitas gagal disimpan.');
+        if ($request->hasFile('bukti')) {
+            $evidencePath = $request->file('bukti')->store('identity-requests', 'local');
+
+            if (! $evidencePath) {
+                abort(500, 'Bukti permintaan identitas gagal disimpan.');
+            }
         }
 
         try {

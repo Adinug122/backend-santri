@@ -345,16 +345,47 @@ class ReportApiTest extends TestCase
             ->assertUnauthorized();
     }
 
-    public function test_identity_request_requires_a_reason_and_evidence_file(): void
+    public function test_identity_request_requires_a_reason(): void
     {
         $report = $this->createReport($this->createUser('santri'));
         Sanctum::actingAs($this->createUser('pimpinan'));
 
         $this->postJson("/api/reports/{$report->id}/identity-request", [])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['alasan', 'bukti']);
+            ->assertJsonValidationErrors(['alasan'])
+            ->assertJsonMissingValidationErrors(['bukti']);
 
         $this->assertDatabaseCount('identity_requests', 0);
+    }
+
+    public function test_pimpinan_can_submit_an_identity_request_without_evidence(): void
+    {
+        Storage::fake('local');
+        $pimpinan = $this->createUser('pimpinan');
+        $report = $this->createReport($this->createUser('santri'));
+        Sanctum::actingAs($pimpinan);
+
+        $this->postJson("/api/reports/{$report->id}/identity-request", [
+            'alasan' => 'Diperlukan untuk pemeriksaan lanjutan.',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('message', 'Permintaan identitas berhasil diajukan')
+            ->assertJsonPath('data.status', 'menunggu')
+            ->assertJsonPath('data.alasan', 'Diperlukan untuk pemeriksaan lanjutan.')
+            ->assertJsonPath('data.bukti_path', null)
+            ->assertJsonPath('laporan.permintaan_identitas.bukti_url', null)
+            ->assertJsonStructure([
+                'data' => ['bukti_path'],
+                'laporan' => ['permintaan_identitas' => ['bukti_url']],
+            ]);
+
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $report->id,
+            'users_id' => $pimpinan->id,
+            'bukti_path' => null,
+        ]);
+
+        Storage::disk('local')->assertDirectoryEmpty('identity-requests');
     }
 
     public function test_identity_request_rejects_unsupported_evidence_files(): void

@@ -85,6 +85,7 @@ class SantriImportController extends Controller
             ], null, 'A2');
             $sheet->fromArray([
                 ['Password wajib diisi untuk santri baru; kosongkan untuk santri lama jika tidak ingin mengubah password.'],
+                ['Santri yang baru dibuat wajib mengganti passwordnya setelah login pertama.'],
             ], null, 'A4');
             $sheet->getStyle('A1:F1')->getFont()->setBold(true);
             (new Xlsx($spreadsheet))->save('php://output');
@@ -271,7 +272,7 @@ class SantriImportController extends Controller
                     'role' => 'santri',
                     'password' => $row['password'],
                     'is_active' => true,
-                    'must_change_password' => false,
+                    'must_change_password' => true,
                 ]);
 
                 Santri::create([

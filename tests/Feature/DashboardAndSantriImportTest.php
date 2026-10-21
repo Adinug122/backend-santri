@@ -333,7 +333,7 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertDatabaseHas('users', [
             'email' => 'siti.test@example.test',
             'role' => 'santri',
-            'must_change_password' => false,
+            'must_change_password' => true,
         ]);
     }
 
@@ -419,7 +419,7 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'Bukan Email']);
     }
 
-    public function test_newly_imported_santri_can_use_protected_apis_without_changing_password(): void
+    public function test_newly_imported_santri_must_change_password_before_using_protected_apis(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
         $this->post('/api/admin/santri/import', [
@@ -430,12 +430,23 @@ class DashboardAndSantriImportTest extends TestCase
         ], ['Accept' => 'application/json'])->assertCreated();
 
         $santri = User::where('email', 'password.test@example.test')->firstOrFail();
-        Sanctum::actingAs($santri);
 
         $this->assertDatabaseHas('users', [
             'id' => $santri->id,
-            'must_change_password' => false,
+            'must_change_password' => true,
         ]);
+
+        Sanctum::actingAs($santri);
+
+        $this->getJson('/api/reports/mine')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
+
+        $this->postJson('/api/auth/password', [
+            'current_password' => 'TempPassword123',
+            'password' => 'PasswordBaru123',
+            'password_confirmation' => 'PasswordBaru123',
+        ])->assertOk();
 
         $this->getJson('/api/reports/mine')->assertOk();
     }
@@ -447,6 +458,125 @@ class DashboardAndSantriImportTest extends TestCase
         Sanctum::actingAs($pengurus);
 
         $this->getJson('/api/reports')->assertOk();
+    }
+
+    public function test_exported_file_can_be_reimported_without_treating_the_same_account_as_duplicate(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $santriUser = $this->createUser('santri', 'roundtrip@example.test');
+        $santri = Santri::create([
+            'users_id' => $santriUser->id,
+            'nis' => '20260030',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->uploadWorkbook($this->exportWorkbook()),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('imported', 1)
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('updated', 1);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $santriUser->id,
+            'email' => 'roundtrip@example.test',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $santri->id,
+            'nis' => '20260030',
+        ]);
+    }
+
+    public function test_exported_file_can_be_edited_and_reimported_to_update_and_create_santri(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $santriUser = $this->createUser('santri', 'edited@example.test');
+        $santri = Santri::create([
+            'users_id' => $santriUser->id,
+            'nis' => '20260031',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+
+        $workbook = $this->exportWorkbook();
+        $sheet = $workbook->getActiveSheet();
+        $sheet->setCellValue('B2', 'Nama Hasil Edit');
+        $sheet->setCellValue('D2', '20260032');
+        $sheet->setCellValue('A3', null);
+        $sheet->setCellValue('B3', 'Santri Baru Dari File');
+        $sheet->setCellValue('C3', 'baru.dari.file@example.test');
+        $sheet->setCellValue('D3', '20260033');
+        $sheet->setCellValue('E3', 'perempuan');
+        $sheet->setCellValue('F3', '081234567899');
+        $sheet->setCellValue('G3', 'PasswordBaru123');
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->uploadWorkbook($workbook),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('imported', 2)
+            ->assertJsonPath('created', 1)
+            ->assertJsonPath('updated', 1);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $santriUser->id,
+            'name' => 'Nama Hasil Edit',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $santri->id,
+            'nis' => '20260032',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'nis' => '20260033',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081234567899',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'email' => 'baru.dari.file@example.test',
+            'role' => 'santri',
+        ]);
+    }
+
+    public function test_import_rejects_rows_whose_email_or_nis_belongs_to_another_santri(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $otherUser = $this->createUser('santri', 'pemilik@example.test');
+        $otherSantri = Santri::create([
+            'users_id' => $otherUser->id,
+            'nis' => '20260040',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['Email Duplikat', 'pemilik@example.test', '20260041', 'laki', '081234567891', 'TempPassword123'],
+            ]),
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.0.row', 2)
+            ->assertJsonPath('errors.0.errors.email.0', 'The email has already been taken.');
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['NIS Duplikat', 'nis.duplikat@example.test', '20260040', 'laki', '081234567891', 'TempPassword123'],
+            ]),
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.0.row', 2)
+            ->assertJsonPath('errors.0.errors.nis.0', 'The nis has already been taken.');
+
+        $this->assertDatabaseMissing('users', ['email' => 'nis.duplikat@example.test']);
+        $this->assertDatabaseHas('santris', [
+            'id' => $otherSantri->id,
+            'nis' => '20260040',
+        ]);
     }
 
     private function createUser(string $role, string $email): User
@@ -487,14 +617,30 @@ class DashboardAndSantriImportTest extends TestCase
             ...$dataRows,
         ]);
 
+        return $this->uploadWorkbook($spreadsheet);
+    }
+
+    private function exportWorkbook(): Spreadsheet
+    {
+        $response = $this->get('/api/admin/santri/export')->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'santri-export-');
+        file_put_contents($path, $response->streamedContent());
+        $spreadsheet = IOFactory::load($path);
+        unlink($path);
+
+        return $spreadsheet;
+    }
+
+    private function uploadWorkbook(Spreadsheet $spreadsheet): UploadedFile
+    {
         $path = tempnam(sys_get_temp_dir(), 'santri-import-');
         (new Xlsx($spreadsheet))->save($path);
-        $spreadsheet->disconnectWorksheets();
         $uploadedFile = UploadedFile::fake()->createWithContent(
             'santri-import.xlsx',
             file_get_contents($path),
         );
         unlink($path);
+        $spreadsheet->disconnectWorksheets();
 
         return $uploadedFile;
     }

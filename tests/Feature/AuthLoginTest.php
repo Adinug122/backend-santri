@@ -127,6 +127,47 @@ class AuthLoginTest extends TestCase
         $this->assertTrue(Hash::check('1234', $user->fresh()->password));
     }
 
+    public function test_santri_created_through_the_api_must_change_password_before_using_protected_apis(): void
+    {
+        $response = $this->postJson('/api/santri', [
+            'name' => 'Santri Baru',
+            'email' => 'santri.baru@example.test',
+            'nis' => '20260050',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ])->assertOk();
+
+        $password = $response->json('password');
+        $this->assertIsString($password);
+        $this->assertGreaterThanOrEqual(4, strlen($password));
+
+        $login = $this->postJson('/api/auth/login', [
+            'identifier' => '20260050',
+            'password' => $password,
+        ])
+            ->assertOk()
+            ->assertJsonPath('role', 'santri')
+            ->assertJsonPath('must_change_password', true);
+
+        $token = $login->json('access_token');
+
+        $this->withToken($token)
+            ->getJson('/api/reports/mine')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
+
+        $this->withToken($token)
+            ->postJson('/api/auth/password', [
+                'current_password' => $password,
+                'password' => 'PasswordBaru123',
+                'password_confirmation' => 'PasswordBaru123',
+            ])->assertOk();
+
+        $this->withToken($token)
+            ->getJson('/api/reports/mine')
+            ->assertOk();
+    }
+
     public function test_user_cannot_change_password_to_fewer_than_four_characters(): void
     {
         $user = User::create([

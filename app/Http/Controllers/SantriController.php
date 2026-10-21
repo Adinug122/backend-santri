@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Santri;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class SantriController extends Controller
 {
@@ -40,7 +41,12 @@ class SantriController extends Controller
             'nis' => 'required|string|unique:santris,nis',
             'jenis_kelamin' => 'required|in:laki,perempuan',
             'telepon_ortu' => 'required|string|min:10|max:20',
+            'password' => 'nullable|string|min:4|max:255',
         ]);
+
+        $plainPassword = $request->filled('password')
+            ? (string) $request->input('password')
+            : Str::password(10, symbols: false);
 
         $user = User::create([
             'name' => $request->name,
@@ -48,7 +54,7 @@ class SantriController extends Controller
             'role' => 'santri',
             'is_active' => true,
             'must_change_password' => true,
-            'password' => bcrypt('password'),
+            'password' => $plainPassword,
         ]);
 
         $santri = Santri::create([
@@ -60,6 +66,7 @@ class SantriController extends Controller
 
         return response()->json([
             'santri' => $santri->load('user'),
+            'password' => $plainPassword,
             'message' => 'Santri Berhasil ditambahkan',
         ]);
     }
