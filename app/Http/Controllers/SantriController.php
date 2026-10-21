@@ -13,11 +13,11 @@ class SantriController extends Controller
      */
     public function index()
     {
-        $user = User::where('role','santri')->get();
+        $user = User::where('role', 'santri')->get();
 
         return response()->json([
             'santri' => $user,
-            'message' => 'Data santri berhasil diambil'
+            'message' => 'Data santri berhasil diambil',
         ]);
     }
 
@@ -39,7 +39,7 @@ class SantriController extends Controller
             'email' => 'required|email|unique:users,email',
             'nis' => 'required|string|unique:santris,nis',
             'jenis_kelamin' => 'required|in:laki,perempuan',
-            'telepon_ortu' => 'required|string|min:10|max:20'
+            'telepon_ortu' => 'required|string|min:10|max:20',
         ]);
 
         $user = User::create([
@@ -48,19 +48,19 @@ class SantriController extends Controller
             'role' => 'santri',
             'is_active' => true,
             'must_change_password' => true,
-            'password' => bcrypt('password')
+            'password' => bcrypt('password'),
         ]);
 
         $santri = Santri::create([
             'users_id' => $user->id,
             'nis' => $request->nis,
             'jenis_kelamin' => $request->jenis_kelamin,
-            'telepon_ortu' => $request->telepon_ortu
+            'telepon_ortu' => $request->telepon_ortu,
         ]);
 
         return response()->json([
             'santri' => $santri->load('user'),
-            'message'=> 'Santri Berhasil ditambahkan'
+            'message' => 'Santri Berhasil ditambahkan',
         ]);
     }
 
@@ -85,16 +85,16 @@ class SantriController extends Controller
      */
     public function update(Request $request, Santri $santri)
     {
-         $request->validate([
+        $request->validate([
             'name' => 'sometimes|string',
-            'email' => ['sometimes','email','unique:users,email,'.$santri->users_id],
-            'nis' => ['sometimes','string','unique:santris,nis,'.$santri->id],
+            'email' => ['sometimes', 'email', 'unique:users,email,'.$santri->users_id],
+            'nis' => ['sometimes', 'string', 'unique:santris,nis,'.$santri->id],
             'jenis_kelamin' => 'sometimes|in:laki,perempuan',
-            'telepon_ortu' => 'sometimes|string|min:10|max:20'
+            'telepon_ortu' => 'sometimes|string|min:10|max:20',
         ]);
 
         $user = $santri->user;
-        
+
         if ($request->has('name') || $request->has('email')) {
             $user->update([
                 'name' => $request->input('name', $user->name),
@@ -105,14 +105,14 @@ class SantriController extends Controller
         $santri->update([
             'nis' => $request->input('nis', $santri->nis),
             'jenis_kelamin' => $request->input('jenis_kelamin', $santri->jenis_kelamin),
-            'telepon_ortu' => $request->input('telepon_ortu', $santri->telepon_ortu)
+            'telepon_ortu' => $request->input('telepon_ortu', $santri->telepon_ortu),
         ]);
-        
+
         return response()->json([
             'santri' => $santri->fresh()->load('user'),
-            'message'=> 'Santri Berhasil diubah'
+            'message' => 'Santri Berhasil diubah',
         ]);
-        
+
     }
 
     /**
@@ -128,7 +128,7 @@ class SantriController extends Controller
         }
 
         return response()->json([
-            'message'=> 'Santri Berhasil dihapus'
+            'message' => 'Santri Berhasil dihapus',
         ]);
     }
 

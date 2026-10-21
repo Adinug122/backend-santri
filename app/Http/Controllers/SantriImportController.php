@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -25,6 +27,48 @@ class SantriImportController extends Controller
         'password',
     ];
 
+    private const EXPORT_HEADERS = [
+        'id_santri',
+        ...self::HEADERS,
+    ];
+
+    public function export(): StreamedResponse|JsonResponse
+    {
+        if (Auth::user()?->role !== 'pimpinan') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        return response()->streamDownload(function (): void {
+            $spreadsheet = new Spreadsheet;
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Data Santri');
+            $sheet->fromArray(self::EXPORT_HEADERS, null, 'A1');
+
+            $rowNumber = 2;
+            Santri::query()
+                ->with('user')
+                ->orderBy('id')
+                ->chunk(500, function ($santris) use ($sheet, &$rowNumber): void {
+                    foreach ($santris as $santri) {
+                        $sheet->setCellValueExplicit('A'.$rowNumber, (string) $santri->id, DataType::TYPE_NUMERIC);
+                        $sheet->setCellValueExplicit('B'.$rowNumber, $santri->user?->name ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('C'.$rowNumber, $santri->user?->email ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('D'.$rowNumber, $santri->nis ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('E'.$rowNumber, $santri->jenis_kelamin, DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('F'.$rowNumber, $santri->telepon_ortu, DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('G'.$rowNumber, '', DataType::TYPE_STRING);
+                        $rowNumber++;
+                    }
+                });
+
+            $sheet->getStyle('A1:G1')->getFont()->setBold(true);
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, 'data-santri.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
     public function template(): StreamedResponse|JsonResponse
     {
         if (Auth::user()?->role !== 'pimpinan') {
@@ -37,10 +81,10 @@ class SantriImportController extends Controller
             $sheet->setTitle('Data Santri');
             $sheet->fromArray(self::HEADERS, null, 'A1');
             $sheet->fromArray([
-                ['Nama Santri', 'santri@example.test', '20260001', 'laki', '081234567890', 'PasswordSementara123'],
+                ['Nama Santri', 'santri@example.test', '20260001', 'laki', '081234567890', 'Pass1234'],
             ], null, 'A2');
             $sheet->fromArray([
-                ['Isi kolom password dengan password sementara; santri wajib menggantinya setelah login.'],
+                ['Password wajib diisi untuk santri baru; kosongkan untuk santri lama jika tidak ingin mengubah password.'],
             ], null, 'A4');
             $sheet->getStyle('A1:F1')->getFont()->setBold(true);
             (new Xlsx($spreadsheet))->save('php://output');
@@ -76,7 +120,9 @@ class SantriImportController extends Controller
             array_shift($rows) ?? [],
         );
 
-        if ($headers !== self::HEADERS) {
+        $hasSantriIds = $headers === self::EXPORT_HEADERS;
+
+        if (! $hasSantriIds && $headers !== self::HEADERS) {
             return response()->json([
                 'message' => 'Header Excel tidak sesuai template.',
                 'required_headers' => self::HEADERS,
@@ -84,26 +130,50 @@ class SantriImportController extends Controller
         }
 
         $previewRows = [];
+        $importRows = [];
         $errors = [];
         $seenEmails = [];
         $seenNis = [];
+        $seenSantriIds = [];
 
         foreach ($rows as $index => $values) {
             $rowNumber = $index + 2;
-            $row = array_combine(self::HEADERS, array_pad(array_slice($values, 0, count(self::HEADERS)), count(self::HEADERS), null));
+            $columnHeaders = $hasSantriIds ? self::EXPORT_HEADERS : self::HEADERS;
+            $row = array_combine($columnHeaders, array_pad(array_slice($values, 0, count($columnHeaders)), count($columnHeaders), null));
 
             if (collect($row)->every(fn ($value) => trim((string) $value) === '')) {
                 continue;
             }
 
             $row = array_map(fn ($value) => trim((string) $value), $row);
+            $santriId = $hasSantriIds && $row['id_santri'] !== '' ? $row['id_santri'] : null;
+            $existingSantri = $santriId !== null && ctype_digit($santriId)
+                ? Santri::with('user')->find((int) $santriId)
+                : null;
+
             $validator = Validator::make($row, [
+                'id_santri' => ['nullable', 'integer', Rule::exists('santris', 'id')],
                 'name' => ['required', 'string', 'max:255'],
-                'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-                'nis' => ['required', 'string', 'max:255', 'unique:santris,nis'],
+                'email' => [
+                    'required',
+                    'email',
+                    'max:255',
+                    Rule::unique('users', 'email')->ignore($existingSantri?->users_id),
+                ],
+                'nis' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('santris', 'nis')->ignore($existingSantri?->id),
+                ],
                 'jenis_kelamin' => ['required', 'in:laki,perempuan'],
                 'telepon_ortu' => ['required', 'string', 'min:10', 'max:20'],
-                'password' => ['required', 'string', 'min:8', 'max:255'],
+                'password' => [
+                    $existingSantri === null ? 'required' : 'nullable',
+                    'string',
+                    'min:4',
+                    'max:255',
+                ],
             ]);
             $rowErrors = $validator->errors()->toArray();
             $emailKey = strtolower($row['email']);
@@ -116,15 +186,33 @@ class SantriImportController extends Controller
                 $rowErrors['nis'][] = 'NIS duplikat di dalam file.';
             }
 
+            if ($santriId !== null && isset($seenSantriIds[$santriId])) {
+                $rowErrors['id_santri'][] = 'ID santri duplikat di dalam file.';
+            }
+
             $seenEmails[$emailKey] = true;
             $seenNis[$row['nis']] = true;
+            if ($santriId !== null) {
+                $seenSantriIds[$santriId] = true;
+            }
 
             if ($rowErrors !== []) {
                 $errors[] = ['row' => $rowNumber, 'errors' => $rowErrors];
             }
 
+            $importRows[] = [
+                'id_santri' => $existingSantri?->id,
+                'name' => $row['name'],
+                'email' => $row['email'],
+                'nis' => $row['nis'],
+                'jenis_kelamin' => $row['jenis_kelamin'],
+                'telepon_ortu' => $row['telepon_ortu'],
+                'password' => $row['password'],
+            ];
+
             $previewRows[] = [
                 'row' => $rowNumber,
+                'id_santri' => $santriId,
                 'name' => $row['name'],
                 'email' => $row['email'],
                 'nis' => $row['nis'],
@@ -151,22 +239,39 @@ class SantriImportController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($rows): void {
-            foreach ($rows as $values) {
-                $row = array_combine(self::HEADERS, array_pad(array_slice($values, 0, count(self::HEADERS)), count(self::HEADERS), null));
+        $created = 0;
+        $updated = 0;
 
-                if (collect($row)->every(fn ($value) => trim((string) $value) === '')) {
+        DB::transaction(function () use ($importRows, &$created, &$updated): void {
+            foreach ($importRows as $row) {
+                if ($row['id_santri'] !== null) {
+                    $santri = Santri::with('user')->findOrFail($row['id_santri']);
+                    $user = $santri->user;
+                    $user->name = $row['name'];
+                    $user->email = $row['email'];
+
+                    if ($row['password'] !== '') {
+                        $user->password = $row['password'];
+                    }
+
+                    $user->save();
+                    $santri->update([
+                        'nis' => $row['nis'],
+                        'jenis_kelamin' => $row['jenis_kelamin'],
+                        'telepon_ortu' => $row['telepon_ortu'],
+                    ]);
+                    $updated++;
+
                     continue;
                 }
 
-                $row = array_map(fn ($value) => trim((string) $value), $row);
                 $user = User::create([
                     'name' => $row['name'],
                     'email' => $row['email'],
                     'role' => 'santri',
                     'password' => $row['password'],
                     'is_active' => true,
-                    'must_change_password' => true,
+                    'must_change_password' => false,
                 ]);
 
                 Santri::create([
@@ -175,12 +280,15 @@ class SantriImportController extends Controller
                     'jenis_kelamin' => $row['jenis_kelamin'],
                     'telepon_ortu' => $row['telepon_ortu'],
                 ]);
+                $created++;
             }
         });
 
         return response()->json([
             'imported' => count($previewRows),
-            'message' => 'Data santri berhasil diimport. Setiap santri wajib mengganti password sementara saat login pertama.',
+            'created' => $created,
+            'updated' => $updated,
+            'message' => 'Data santri berhasil diimport.',
         ], 201);
     }
 }

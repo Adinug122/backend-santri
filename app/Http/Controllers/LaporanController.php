@@ -12,8 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-
-use function Laravel\Prompts\error;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class LaporanController extends Controller
 {
@@ -22,6 +21,20 @@ class LaporanController extends Controller
         $role = Auth::user()?->role;
 
         return in_array($role, ['pengurus', 'pimpinan'], true);
+    }
+
+    /**
+     * Tandai laporan sebagai sudah dibaca oleh peran pengguna saat ini.
+     */
+    private function markAsRead(Laporan $laporan): void
+    {
+        $kolom = Laporan::readColumnFor(Auth::user()?->role);
+
+        if ($kolom === null) {
+            return;
+        }
+
+        Laporan::whereKey($laporan->id)->toBase()->update([$kolom => now()]);
     }
 
     private function canAccessReport(Laporan $laporan): bool
@@ -196,10 +209,10 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $payload = $this->reportPayload($laporan, $this->hasStaffAccess());
+        $this->markAsRead($laporan);
 
         return response()->json([
-            'data' => $payload,
+            'data' => $this->reportPayload($laporan->fresh(), $this->hasStaffAccess()),
             'message' => 'Detail laporan berhasil diambil',
         ]);
     }
@@ -232,12 +245,15 @@ class LaporanController extends Controller
         }
 
         $request->validate([
-            'status' => ['required', 'in:baru,diproses,selesai'],
+            'status' => ['required', 'in:diproses,selesai'],
         ]);
 
-        $laporan->update([
-            'status' => $request->status,
-        ]);
+        if ($laporan->status !== $request->status) {
+            $laporan->update([
+                'status_diubah' => now(),
+                'status' => $request->status,
+            ]);
+        }
 
         return response()->json([
             'message' => 'Status laporan berhasil diubah',
@@ -264,7 +280,7 @@ class LaporanController extends Controller
             'laporan_id' => $laporan->id,
         ]);
 
-        $laporan->update(['status' => 'diproses']);
+        $laporan->update(['status' => 'diproses', 'status_diubah' => now()]);
 
         return response()->json([
             'message' => 'Eskalasi berhasil dicatat',
@@ -277,6 +293,8 @@ class LaporanController extends Controller
         if (! $this->canAccessReport($laporan)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
+
+        $this->markAsRead($laporan);
 
         return response()->json([
             'data' => $laporan->percakapans()
@@ -428,6 +446,8 @@ class LaporanController extends Controller
                     : 'Permintaan identitas ditolak',
                 'data' => $this->reportPayload($laporan->fresh(), false),
             ]);
+        } catch (HttpException $error) {
+            throw $error;
         } catch (Exception $error) {
             return response()->json([
                 'message' => 'Gagal merespons permintaan identitas',

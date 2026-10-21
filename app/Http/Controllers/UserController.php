@@ -12,7 +12,7 @@ class UserController extends Controller
     {
         $request->validate([
             'identifier' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8'],
+            'password' => ['required', 'string', 'min:4'],
         ]);
 
         $identifier = $request->string('identifier')->trim()->toString();
@@ -49,7 +49,7 @@ class UserController extends Controller
     {
         $request->validate([
             'current_password' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'password' => ['required', 'string', 'min:4', 'confirmed'],
         ]);
 
         $user = $request->user();

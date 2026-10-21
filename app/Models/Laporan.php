@@ -7,6 +7,17 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Laporan extends Model
 {
+    /**
+     * Kolom penanda "sudah dibaca" untuk setiap peran pengguna.
+     *
+     * @var array<string, string>
+     */
+    public const READ_COLUMNS = [
+        'santri' => 'santri_dibaca',
+        'pengurus' => 'pengurus_dibaca',
+        'pimpinan' => 'pimpinan_dibaca',
+    ];
+
     protected $table = 'laporans';
 
     protected $fillable = [
@@ -16,6 +27,10 @@ class Laporan extends Model
         'isi',
         'tampilkan_identitas',
         'status',
+        'status_diubah',
+        'santri_dibaca',
+        'pengurus_dibaca',
+        'pimpinan_dibaca',
         'waktu',
     ];
 
@@ -23,7 +38,19 @@ class Laporan extends Model
         'tampilkan_identitas' => 'boolean',
         'waktu' => 'datetime',
         'status' => 'string',
+        'status_diubah' => 'datetime',
+        'santri_dibaca' => 'datetime',
+        'pengurus_dibaca' => 'datetime',
+        'pimpinan_dibaca' => 'datetime',
     ];
+
+    /**
+     * Kolom penanda dibaca untuk sebuah peran, atau null bila perannya tidak dikenal.
+     */
+    public static function readColumnFor(?string $role): ?string
+    {
+        return self::READ_COLUMNS[$role] ?? null;
+    }
 
     public function user()
     {

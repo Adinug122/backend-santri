@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LaporanController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SantriController;
 use App\Http\Controllers\SantriImportController;
 use App\Http\Controllers\UserController;
@@ -27,6 +28,7 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/admin/accounts', [DashboardController::class, 'account']);
     Route::post('/admin/accounts', [DashboardController::class, 'storeAccount']);
     Route::patch('/admin/accounts/{user}/status', [DashboardController::class, 'isActiveAccount'])->whereNumber('user');
+    Route::get('/admin/santri/export', [SantriImportController::class, 'export']);
     Route::get('/admin/santri/template', [SantriImportController::class, 'template']);
     Route::post('/admin/santri/import', [SantriImportController::class, 'import']);
 
@@ -46,6 +48,8 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+    Route::get('/notifications/summary', [NotificationController::class, 'summary'])
+        ->middleware('throttle:120,1');
 });
 
 Route::resource('/santri', SantriController::class);

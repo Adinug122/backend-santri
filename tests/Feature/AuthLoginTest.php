@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Santri;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class AuthLoginTest extends TestCase
@@ -87,5 +89,63 @@ class AuthLoginTest extends TestCase
             'identifier' => 'nonaktif@example.test',
             'password' => 'password123',
         ])->assertUnauthorized();
+    }
+
+    public function test_user_can_login_with_four_character_password(): void
+    {
+        User::create([
+            'name' => 'Santri Test',
+            'email' => 'password.minimum@example.test',
+            'role' => 'santri',
+            'password' => '1234',
+            'is_active' => true,
+        ]);
+
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'password.minimum@example.test',
+            'password' => '1234',
+        ])->assertOk();
+    }
+
+    public function test_user_can_change_password_to_four_characters(): void
+    {
+        $user = User::create([
+            'name' => 'Santri Test',
+            'email' => 'password.change@example.test',
+            'role' => 'santri',
+            'password' => 'password123',
+            'is_active' => true,
+        ]);
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/auth/password', [
+            'current_password' => 'password123',
+            'password' => '1234',
+            'password_confirmation' => '1234',
+        ])->assertOk();
+
+        $this->assertTrue(Hash::check('1234', $user->fresh()->password));
+    }
+
+    public function test_user_cannot_change_password_to_fewer_than_four_characters(): void
+    {
+        $user = User::create([
+            'name' => 'Santri Test',
+            'email' => 'password.short@example.test',
+            'role' => 'santri',
+            'password' => 'password123',
+            'is_active' => true,
+        ]);
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/auth/password', [
+            'current_password' => 'password123',
+            'password' => '123',
+            'password_confirmation' => '123',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['password']);
+
+        $this->assertTrue(Hash::check('password123', $user->fresh()->password));
     }
 }

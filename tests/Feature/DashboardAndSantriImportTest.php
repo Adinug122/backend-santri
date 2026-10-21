@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
@@ -159,7 +160,7 @@ class DashboardAndSantriImportTest extends TestCase
         $this->postJson('/api/admin/accounts', [
             'name' => 'Pengurus Baru',
             'email' => 'pengurus.baru@example.test',
-            'password' => 'short',
+            'password' => 'abc',
         ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['password']);
@@ -233,16 +234,69 @@ class DashboardAndSantriImportTest extends TestCase
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
 
-        $this->get('/api/admin/santri/template')
+        $response = $this->get('/api/admin/santri/template')
             ->assertOk()
             ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             ->assertHeader('content-disposition', 'attachment; filename=template-import-santri.xlsx');
+
+        $path = tempnam(sys_get_temp_dir(), 'santri-template-');
+        file_put_contents($path, $response->streamedContent());
+        $spreadsheet = IOFactory::load($path);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $this->assertSame('name', $sheet->getCell('A1')->getValue());
+        $this->assertSame('email', $sheet->getCell('B1')->getValue());
+        $this->assertSame('nis', $sheet->getCell('C1')->getValue());
+        $this->assertSame('jenis_kelamin', $sheet->getCell('D1')->getValue());
+        $this->assertSame('telepon_ortu', $sheet->getCell('E1')->getValue());
+        $this->assertSame('password', $sheet->getCell('F1')->getValue());
+        $this->assertNull($sheet->getCell('G1')->getValue());
+
+        $spreadsheet->disconnectWorksheets();
+        unlink($path);
+    }
+
+    public function test_pimpinan_can_export_santri_with_update_ids_and_blank_passwords(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $santriUser = $this->createUser('santri', 'santri.export@example.test');
+        $santri = Santri::create([
+            'users_id' => $santriUser->id,
+            'nis' => '20260010',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+
+        $response = $this->get('/api/admin/santri/export')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->assertHeader('content-disposition', 'attachment; filename=data-santri.xlsx');
+
+        $path = tempnam(sys_get_temp_dir(), 'santri-export-');
+        file_put_contents($path, $response->streamedContent());
+        $spreadsheet = IOFactory::load($path);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $this->assertSame('id_santri', $sheet->getCell('A1')->getValue());
+        $this->assertSame('name', $sheet->getCell('B1')->getValue());
+        $this->assertSame('email', $sheet->getCell('C1')->getValue());
+        $this->assertSame('nis', $sheet->getCell('D1')->getValue());
+        $this->assertSame('jenis_kelamin', $sheet->getCell('E1')->getValue());
+        $this->assertSame('telepon_ortu', $sheet->getCell('F1')->getValue());
+        $this->assertSame('password', $sheet->getCell('G1')->getValue());
+        $this->assertSame((string) $santri->id, (string) $sheet->getCell('A2')->getValue());
+        $this->assertSame($santriUser->name, $sheet->getCell('B2')->getValue());
+        $this->assertNull($sheet->getCell('G2')->getValue());
+
+        $spreadsheet->disconnectWorksheets();
+        unlink($path);
     }
 
     public function test_non_pimpinan_cannot_access_santri_import_endpoints(): void
     {
         Sanctum::actingAs($this->createUser('pengurus', 'pengurus@example.test'));
 
+        $this->getJson('/api/admin/santri/export')->assertForbidden();
         $this->getJson('/api/admin/santri/template')->assertForbidden();
         $this->postJson('/api/admin/santri/import')->assertForbidden();
     }
@@ -279,7 +333,72 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertDatabaseHas('users', [
             'email' => 'siti.test@example.test',
             'role' => 'santri',
-            'must_change_password' => true,
+            'must_change_password' => false,
+        ]);
+    }
+
+    public function test_import_updates_santri_by_id_without_changing_blank_password_or_deleting_missing_rows(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $existingUser = $this->createUser('santri', 'old.santri@example.test');
+        $existingSantri = Santri::create([
+            'users_id' => $existingUser->id,
+            'nis' => '20260020',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+        $untouchedUser = $this->createUser('santri', 'untouched.santri@example.test');
+        $untouchedSantri = Santri::create([
+            'users_id' => $untouchedUser->id,
+            'nis' => '20260021',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081234567891',
+        ]);
+        $existingPassword = $existingUser->password;
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                [$existingSantri->id, 'Nama Diperbarui', $existingUser->email, '20260022', 'perempuan', '081234567892', ''],
+            ], true),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('imported', 1)
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('updated', 1);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $existingUser->id,
+            'name' => 'Nama Diperbarui',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $existingSantri->id,
+            'nis' => '20260022',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081234567892',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $untouchedSantri->id,
+            'nis' => '20260021',
+        ]);
+        $this->assertSame($existingPassword, $existingUser->fresh()->password);
+    }
+
+    public function test_import_requires_new_santri_password_to_have_at_least_four_characters(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['Santi Test', 'santi.test@example.test', '20260023', 'perempuan', '081234567893', 'abc'],
+            ]),
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.0.errors.password.0', 'The password field must be at least 4 characters.');
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'santi.test@example.test',
         ]);
     }
 
@@ -300,7 +419,7 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'Bukan Email']);
     }
 
-    public function test_imported_santri_must_change_temporary_password_before_using_protected_apis(): void
+    public function test_newly_imported_santri_can_use_protected_apis_without_changing_password(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
         $this->post('/api/admin/santri/import', [
@@ -312,16 +431,6 @@ class DashboardAndSantriImportTest extends TestCase
 
         $santri = User::where('email', 'password.test@example.test')->firstOrFail();
         Sanctum::actingAs($santri);
-
-        $this->getJson('/api/reports/mine')
-            ->assertForbidden()
-            ->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
-
-        $this->postJson('/api/auth/password', [
-            'current_password' => 'TempPassword123',
-            'password' => 'NewSecurePassword123',
-            'password_confirmation' => 'NewSecurePassword123',
-        ])->assertOk();
 
         $this->assertDatabaseHas('users', [
             'id' => $santri->id,
@@ -367,12 +476,14 @@ class DashboardAndSantriImportTest extends TestCase
         ]);
     }
 
-    private function createWorkbook(array $dataRows): UploadedFile
+    private function createWorkbook(array $dataRows, bool $includeSantriIds = false): UploadedFile
     {
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->fromArray([
-            ['name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password'],
+            $includeSantriIds
+                ? ['id_santri', 'name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password']
+                : ['name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password'],
             ...$dataRows,
         ]);
 
