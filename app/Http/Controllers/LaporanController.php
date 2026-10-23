@@ -68,7 +68,7 @@ class LaporanController extends Controller
     {
         $laporan->loadMissing([
             'user',
-            'latestIdentityRequest',
+            'latestIdentityRequest.user',
             'percakapans.pengirim',
             ...($includeInternalNotes ? ['catatans.user'] : []),
         ]);
@@ -102,12 +102,18 @@ class LaporanController extends Controller
         return [
             'status' => $identityRequest->status,
             'alasan' => $identityRequest->alasan,
+            'diminta_oleh' => $identityRequest->user?->name,
+            'bukti_nama' => $identityRequest->bukti_path
+                ? basename($identityRequest->bukti_path)
+                : null,
             'bukti_url' => $identityRequest->bukti_path
                 ? Storage::disk('local')->temporaryUrl(
                     $identityRequest->bukti_path,
                     now()->addMinutes(15),
                 )
                 : null,
+            'dibuat' => $identityRequest->created_at,
+            'dijawab' => $identityRequest->dijawab,
             'waktu' => $identityRequest->created_at,
         ];
     }
@@ -225,14 +231,46 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $validated = $request->validate([
+        $request->validate([
             'tampilkan_identitas' => ['sometimes', 'required', 'boolean'],
         ]);
 
-        $laporan->update([
-            'tampilkan_identitas' => $validated['tampilkan_identitas']
-                ?? ! $laporan->tampilkan_identitas,
-        ]);
+        DB::transaction(function () use ($request, $laporan): void {
+            $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+
+            $tampilkanIdentitas = $request->has('tampilkan_identitas')
+                ? $request->boolean('tampilkan_identitas')
+                : ! $lockedLaporan->tampilkan_identitas;
+
+            $lockedLaporan->update([
+                'tampilkan_identitas' => $tampilkanIdentitas,
+            ]);
+
+            $identityRequest = $lockedLaporan->identityRequests()
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $identityRequest) {
+                return;
+            }
+
+            if (! $tampilkanIdentitas && $identityRequest->status === 'disetujui') {
+                $identityRequest->update([
+                    'status' => 'dicabut',
+                    'dijawab' => now(),
+                ]);
+
+                return;
+            }
+
+            if ($tampilkanIdentitas && $identityRequest->status === 'dicabut') {
+                $identityRequest->update([
+                    'status' => 'disetujui',
+                    'dijawab' => now(),
+                ]);
+            }
+        });
 
         return response()->json([
             'message' => 'Status tampilan identitas berhasil diubah',
@@ -374,6 +412,16 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $latestIdentityRequest = $laporan->latestIdentityRequest;
+
+        if (in_array($latestIdentityRequest?->status, ['menunggu', 'disetujui'], true)) {
+            return response()->json([
+                'message' => $latestIdentityRequest->status === 'menunggu'
+                    ? 'Permintaan untuk laporan ini masih menunggu jawaban santri.'
+                    : 'Santri sudah menyetujui permintaan untuk laporan ini.',
+            ], 409);
+        }
+
         $validated = $request->validate([
             'alasan' => ['required', 'string', 'max:2000'],
             'bukti' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
@@ -440,7 +488,10 @@ class LaporanController extends Controller
                     abort(404, 'Tidak ada permintaan identitas yang menunggu persetujuan.');
                 }
 
-                $identityRequest->update(['status' => $identityStatus]);
+                $identityRequest->update([
+                    'status' => $identityStatus,
+                    'dijawab' => now(),
+                ]);
                 $laporan->update([
                     'tampilkan_identitas' => $identityStatus === 'disetujui',
                 ]);

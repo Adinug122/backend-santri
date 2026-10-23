@@ -542,6 +542,135 @@ class ReportApiTest extends TestCase
         ]);
     }
 
+    public function test_santri_can_revoke_approved_identity_and_staff_see_anonymous_name(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $this->submitIdentityRequest($report, $this->createUser('pimpinan'));
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$report->id}/identity-request", [
+            'status' => 'disetujui',
+        ])->assertOk();
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('laporan.tampilkan_identitas', false)
+            ->assertJsonPath('laporan.permintaan_identitas.status', 'dicabut')
+            ->assertJsonPath('laporan.user.name', $santri->name);
+
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $report->id,
+            'status' => 'dicabut',
+        ]);
+        $this->assertNotNull($report->fresh()->latestIdentityRequest->dijawab);
+        $this->assertDatabaseHas('laporans', [
+            'id' => $report->id,
+            'tampilkan_identitas' => false,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.permintaan_identitas.status', 'dicabut')
+            ->assertJsonPath('data.0.user.name', 'Anonymous');
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson("/api/reports/{$report->id}")
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas.status', 'dicabut')
+            ->assertJsonPath('data.permintaan_identitas.dijawab', fn ($value) => $value !== null)
+            ->assertJsonPath('data.user.name', 'Anonymous');
+    }
+
+    public function test_santri_can_restore_consent_by_turning_identity_back_on(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $this->submitIdentityRequest($report, $this->createUser('pimpinan'));
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$report->id}/identity-request", [
+            'status' => 'disetujui',
+        ])->assertOk();
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => false,
+        ])->assertOk();
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('laporan.tampilkan_identitas', true)
+            ->assertJsonPath('laporan.permintaan_identitas.status', 'disetujui');
+
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $report->id,
+            'status' => 'disetujui',
+        ]);
+    }
+
+    public function test_turning_identity_off_does_not_revoke_a_pending_request(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $this->submitIdentityRequest($report, $this->createUser('pimpinan'));
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$report->id}/identity", [
+            'tampilkan_identitas' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('laporan.permintaan_identitas.status', 'menunggu');
+
+        $this->assertDatabaseHas('identity_requests', [
+            'laporan_id' => $report->id,
+            'status' => 'menunggu',
+        ]);
+    }
+
+    public function test_pimpinan_cannot_submit_a_duplicate_identity_request_while_one_is_active(): void
+    {
+        Storage::fake('local');
+        $pimpinan = $this->createUser('pimpinan');
+        $report = $this->createReport($this->createUser('santri'));
+        $this->submitIdentityRequest($report, $pimpinan);
+        Sanctum::actingAs($pimpinan);
+
+        $this->postJson("/api/reports/{$report->id}/identity-request", [
+            'alasan' => 'Permintaan identitas kedua.',
+        ])->assertStatus(409);
+
+        $this->assertDatabaseCount('identity_requests', 1);
+    }
+
+    public function test_identity_request_decision_records_answered_at(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $this->submitIdentityRequest($report, $this->createUser('pimpinan'));
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$report->id}/identity-request", [
+            'status' => 'disetujui',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas.status', 'disetujui');
+
+        $identityRequest = IdentityRequest::query()->sole();
+        $this->assertNotNull($identityRequest->dijawab);
+        $this->assertTrue($identityRequest->dijawab->isSameDay(now()));
+    }
+
     public function test_santri_report_details_do_not_include_internal_notes(): void
     {
         $santri = $this->createUser('santri');

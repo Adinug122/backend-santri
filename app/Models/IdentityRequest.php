@@ -13,6 +13,11 @@ class IdentityRequest extends Model
         'alasan',
         'bukti_path',
         'status',
+        'dijawab',
+    ];
+
+    protected $casts = [
+        'dijawab' => 'datetime',
     ];
 
     public function laporan(): BelongsTo
