@@ -18,6 +18,18 @@ use Illuminate\Support\Str;
 class NotificationController extends Controller
 {
     /**
+     * Penomoran tetap agar id notifikasi unik per kategori per laporan.
+     *
+     * @var array<string, int>
+     */
+    private const NOTIFICATION_ID_SUFFIX = [
+        'laporan_baru' => 1,
+        'pesan_baru' => 2,
+        'status_diubah' => 3,
+        'permintaan_identitas' => 4,
+    ];
+
+    /**
      * @return array<string, Builder>|null
      */
     private function queriesFor(User $user): ?array
@@ -109,7 +121,7 @@ class NotificationController extends Controller
     )]
     #[Response(
         description: 'Daftar notifikasi berhasil diambil.',
-        type: "array{message: 'Berhasil mengambil daftar notifikasi.', code: 'NOTIFICATION_LIST_SUCCESS', data: array<int, array{id: string, tipe: 'laporan_baru'|'pesan_baru'|'status_diubah'|'permintaan_identitas', laporan_id: int, no_laporan: string, kategori: string, waktu: string|null, status_baru: bool, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}>, meta: array{current_page: int, per_page: int, total: int, last_page: int, from: int|null, to: int|null}}",
+        type: "array{message: 'Berhasil mengambil daftar notifikasi.', code: 'NOTIFICATION_LIST_SUCCESS', data: array{items: array<int, array{id: int, tipe: 'laporan_baru'|'pesan_baru'|'status_diubah'|'permintaan_identitas', laporan_id: int, no_laporan: string, kategori: string, waktu: string|null, status_baru: string|null, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}>, meta: array{current_page: int, per_page: int, total: int, last_page: int, from: int|null, to: int|null}}}",
     )]
     public function index(Request $request): JsonResponse
     {
@@ -164,29 +176,32 @@ class NotificationController extends Controller
 
         $items = collect($paginator->items())
             ->map(function (array $item): array {
-                $item['waktu'] = $item['waktu']?->toIso8601String();
+                $item['waktu'] = $item['waktu']?->toISOString();
 
                 return $item;
             })
+            ->values()
             ->all();
 
         return response()->json([
             'message' => 'Berhasil mengambil daftar notifikasi.',
             'code' => 'NOTIFICATION_LIST_SUCCESS',
-            'data' => $items,
-            'meta' => [
-                'current_page' => $paginator->currentPage(),
-                'per_page' => $paginator->perPage(),
-                'total' => $paginator->total(),
-                'last_page' => $paginator->lastPage(),
-                'from' => $paginator->firstItem(),
-                'to' => $paginator->lastItem(),
+            'data' => [
+                'items' => $items,
+                'meta' => [
+                    'current_page' => $paginator->currentPage(),
+                    'per_page' => $paginator->perPage(),
+                    'total' => $paginator->total(),
+                    'last_page' => $paginator->lastPage(),
+                    'from' => $paginator->firstItem(),
+                    'to' => $paginator->lastItem(),
+                ],
             ],
         ]);
     }
 
     /**
-     * @return array{id: string, tipe: string, laporan_id: int, no_laporan: string, kategori: string, waktu: CarbonInterface|null, status_baru: bool, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}
+     * @return array{id: int, tipe: string, laporan_id: int, no_laporan: string, kategori: string, waktu: CarbonInterface|null, status_baru: string|null, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}
      */
     private function notificationPayload(Laporan $laporan, string $tipe, User $user): array
     {
@@ -211,13 +226,15 @@ class NotificationController extends Controller
         };
 
         return [
-            'id' => "{$tipe}:{$laporan->id}",
+            'id' => $laporan->id * 10 + self::NOTIFICATION_ID_SUFFIX[$tipe],
             'tipe' => $tipe,
             'laporan_id' => $laporan->id,
             'no_laporan' => $laporan->no_laporan,
             'kategori' => $laporan->kategori,
             'waktu' => $waktu,
-            'status_baru' => $laporan->status === 'baru',
+            'status_baru' => in_array($tipe, ['laporan_baru', 'status_diubah'], true)
+                ? $laporan->status
+                : null,
             'pengirim' => $pengirim,
             'preview' => $preview,
             'url' => "/api/reports/{$laporan->id}",

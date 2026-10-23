@@ -316,32 +316,33 @@ class NotificationApiTest extends TestCase
         $response = $this->getJson('/api/notifications')
             ->assertOk()
             ->assertJsonPath('code', 'NOTIFICATION_LIST_SUCCESS')
-            ->assertJsonCount(2, 'data')
-            ->assertJsonPath('meta.current_page', 1)
-            ->assertJsonPath('meta.per_page', 20)
-            ->assertJsonPath('meta.total', 2)
-            ->assertJsonPath('meta.last_page', 1)
-            ->assertJsonPath('meta.from', 1)
-            ->assertJsonPath('meta.to', 2);
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.meta.current_page', 1)
+            ->assertJsonPath('data.meta.per_page', 20)
+            ->assertJsonPath('data.meta.total', 2)
+            ->assertJsonPath('data.meta.last_page', 1)
+            ->assertJsonPath('data.meta.from', 1)
+            ->assertJsonPath('data.meta.to', 2);
 
-        $items = collect($response->json('data'))->keyBy('tipe');
+        $items = collect($response->json('data.items'))->keyBy('tipe');
 
         $this->assertSame(['permintaan_identitas', 'pesan_baru'], $items->keys()->sort()->values()->all());
 
         $identity = $items['permintaan_identitas'];
-        $this->assertSame("permintaan_identitas:{$report->id}", $identity['id']);
+        $this->assertSame($report->id * 10 + 4, $identity['id']);
         $this->assertSame($report->id, $identity['laporan_id']);
         $this->assertSame($report->no_laporan, $identity['no_laporan']);
         $this->assertSame($report->kategori, $identity['kategori']);
         $this->assertSame('Diperlukan untuk tindak lanjut.', $identity['preview']);
         $this->assertSame(['id' => $pimpinan->id, 'name' => $pimpinan->name, 'role' => 'pimpinan'], $identity['pengirim']);
-        $this->assertTrue($identity['status_baru']);
+        $this->assertNull($identity['status_baru']);
         $this->assertSame("/api/reports/{$report->id}", $identity['url']);
 
         $message = $items['pesan_baru'];
-        $this->assertSame("pesan_baru:{$report->id}", $message['id']);
+        $this->assertSame($report->id * 10 + 2, $message['id']);
         $this->assertSame('Mohon lengkapi informasi laporan.', $message['preview']);
         $this->assertSame($pimpinan->id, $message['pengirim']['id']);
+        $this->assertNull($message['status_baru']);
 
         $this->assertNull($report->fresh()->santri_dibaca);
     }
@@ -356,15 +357,15 @@ class NotificationApiTest extends TestCase
 
         $response = $this->getJson('/api/notifications')
             ->assertOk()
-            ->assertJsonCount(1, 'data');
+            ->assertJsonCount(1, 'data.items');
 
-        $item = $response->json('data.0');
+        $item = $response->json('data.items.0');
 
         $this->assertSame('laporan_baru', $item['tipe']);
         $this->assertSame($report->id, $item['laporan_id']);
         $this->assertNull($item['pengirim']);
         $this->assertSame('Lampu kamar rusak.', $item['preview']);
-        $this->assertTrue($item['status_baru']);
+        $this->assertSame('baru', $item['status_baru']);
 
         $this->assertNull($report->fresh()->pengurus_dibaca);
     }
@@ -379,7 +380,7 @@ class NotificationApiTest extends TestCase
 
         $item = $this->getJson('/api/notifications')
             ->assertOk()
-            ->json('data.0');
+            ->json('data.items.0');
 
         $this->assertSame([
             'id' => $santri->id,
@@ -401,11 +402,11 @@ class NotificationApiTest extends TestCase
 
         $response = $this->getJson('/api/notifications')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonPath('data.0.laporan_id', $newer->id)
-            ->assertJsonPath('data.1.laporan_id', $older->id);
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.items.0.laporan_id', $newer->id)
+            ->assertJsonPath('data.items.1.laporan_id', $older->id);
 
-        $ids = collect($response->json('data'))->pluck('id');
+        $ids = collect($response->json('data.items'))->pluck('id');
         $this->assertSame($ids->unique()->count(), $ids->count());
     }
 
@@ -422,20 +423,20 @@ class NotificationApiTest extends TestCase
 
         $this->getJson('/api/notifications?page=1&per_page=2')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonPath('meta.current_page', 1)
-            ->assertJsonPath('meta.per_page', 2)
-            ->assertJsonPath('meta.total', 3)
-            ->assertJsonPath('meta.last_page', 2)
-            ->assertJsonPath('meta.from', 1)
-            ->assertJsonPath('meta.to', 2);
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.meta.current_page', 1)
+            ->assertJsonPath('data.meta.per_page', 2)
+            ->assertJsonPath('data.meta.total', 3)
+            ->assertJsonPath('data.meta.last_page', 2)
+            ->assertJsonPath('data.meta.from', 1)
+            ->assertJsonPath('data.meta.to', 2);
 
         $this->getJson('/api/notifications?page=2&per_page=2')
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('meta.current_page', 2)
-            ->assertJsonPath('meta.from', 3)
-            ->assertJsonPath('meta.to', 3);
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.meta.current_page', 2)
+            ->assertJsonPath('data.meta.from', 3)
+            ->assertJsonPath('data.meta.to', 3);
     }
 
     public function test_notification_list_and_summary_stay_in_sync_after_reading_report(): void
@@ -466,7 +467,7 @@ class NotificationApiTest extends TestCase
 
         $this->getJson('/api/notifications')
             ->assertOk()
-            ->assertJsonPath('meta.total', 2);
+            ->assertJsonPath('data.meta.total', 2);
 
         $this->getJson("/api/reports/{$report->id}")->assertOk();
 
@@ -476,8 +477,29 @@ class NotificationApiTest extends TestCase
 
         $this->getJson('/api/notifications')
             ->assertOk()
-            ->assertJsonPath('meta.total', 0)
-            ->assertJsonCount(0, 'data');
+            ->assertJsonPath('data.meta.total', 0)
+            ->assertJsonCount(0, 'data.items');
+    }
+
+    public function test_status_change_notification_exposes_the_new_status(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+
+        Laporan::whereKey($report->id)->update(['created_at' => now()->subMinutes(5)]);
+        $report->update(['status' => 'diproses', 'status_diubah' => now()]);
+
+        Sanctum::actingAs($santri);
+
+        $item = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.items')
+            ->json('data.items.0');
+
+        $this->assertSame('status_diubah', $item['tipe']);
+        $this->assertSame($report->id * 10 + 3, $item['id']);
+        $this->assertSame('diproses', $item['status_baru']);
+        $this->assertNull($item['pengirim']);
     }
 
     public function test_notification_summary_supports_etag(): void

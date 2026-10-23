@@ -64,8 +64,8 @@ Logout is available at `POST /api/auth/logout`.
 ## Notification API
 
 - `GET /api/notifications/summary` returns the number of reports with updates for the logged-in user. The response includes an `ETag`; send it back as `If-None-Match` to receive `304 Not Modified` while nothing has changed.
-- `GET /api/notifications?page=1&per_page=20` returns unread notifications, newest first, with pagination meta (`current_page`, `per_page`, `total`, `last_page`, `from`, `to`). `per_page` is limited to 100.
-- Granularity is one notification per category per report, matching the summary, so `meta.total` equals the summary's `pembaruan` value. Each item contains `id` (unique, e.g. `pesan_baru:12`), `tipe` (`laporan_baru`, `pesan_baru`, `status_diubah`, or `permintaan_identitas`), `laporan_id`, `no_laporan`, `kategori`, `waktu`, `status_baru`, `pengirim` (`id`, `name`, `role`, or `null` when identity is hidden), `preview`, and `url` pointing to the report detail endpoint.
+- `GET /api/notifications?page=1&per_page=20` returns unread notifications, newest first, as `data.items` with pagination `data.meta` (`current_page`, `per_page`, `total`, `last_page`, `from`, `to`). `per_page` is limited to 100.
+- Granularity is one notification per category per report, matching the summary, so `data.meta.total` equals the summary's `pembaruan` value. Each item contains a numeric `id` that is unique per category per report (`laporan_id * 10 + category code`), `tipe` (`laporan_baru`, `pesan_baru`, `status_diubah`, or `permintaan_identitas`), `laporan_id`, `no_laporan`, `kategori`, `waktu` (ISO 8601), `status_baru` (the report status for `laporan_baru`/`status_diubah`, otherwise `null`), `pengirim` (`id`, `name`, `role`, or `null` when identity is hidden), `preview`, and `url` pointing to the report detail endpoint.
 - Opening the list does not mark reports as read. Reading the report detail or its messages updates the role-specific read column, so the summary and list stay in sync.
 
 ## Dashboard and Santri Import API
