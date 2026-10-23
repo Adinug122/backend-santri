@@ -7,7 +7,6 @@ use App\Http\Controllers\SantriController;
 use App\Http\Controllers\SantriImportController;
 use App\Http\Controllers\UserController;
 use App\Http\Middleware\EnsurePasswordChanged;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -19,6 +18,7 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/user', [UserController::class, 'me']);
     Route::post('/auth/logout', [UserController::class, 'logout']);
 });
 
@@ -45,9 +45,6 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::post('/reports/{laporan}/messages', [LaporanController::class, 'sendMessage'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/notes', [LaporanController::class, 'addNote'])->whereNumber('laporan');
 
-    Route::get('/user', function (Request $request) {
-        return $request->user();
-    });
     Route::get('/notifications', [NotificationController::class, 'index'])
         ->middleware('throttle:120,1');
     Route::get('/notifications/summary', [NotificationController::class, 'summary'])

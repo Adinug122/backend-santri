@@ -92,6 +92,14 @@ class DashboardAndSantriImportTest extends TestCase
             'must_change_password' => true,
         ]);
         $this->assertTrue(Hash::check('TempPassword123', $user->password));
+
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'pengurus.baru@example.test',
+            'password' => 'TempPassword123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('user.must_change_password', true)
+            ->assertJsonPath('user.santri', null);
     }
 
     public function test_unauthenticated_request_returns_401_when_creating_pengurus_account(): void
@@ -455,6 +463,16 @@ class DashboardAndSantriImportTest extends TestCase
             'must_change_password' => true,
         ]);
         $this->assertTrue(Hash::check('12345678', $santri->password));
+
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'password.test@example.test',
+            'password' => '12345678',
+        ])
+            ->assertOk()
+            ->assertJsonPath('must_change_password', true)
+            ->assertJsonPath('user.must_change_password', true)
+            ->assertJsonPath('user.santri.nis', '20260004')
+            ->assertJsonPath('user.santri.telepon_ortu', '081234567893');
 
         Sanctum::actingAs($santri);
 

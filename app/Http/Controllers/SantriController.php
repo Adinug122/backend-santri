@@ -14,10 +14,25 @@ class SantriController extends Controller
      */
     public function index()
     {
-        $user = User::where('role', 'santri')->get();
+        $santri = User::where('role', 'santri')
+            ->with('santri:id,users_id,nis,telepon_ortu')
+            ->get()
+            ->map(function (User $user): array {
+                $data = $user->toArray();
+                $data['santri'] = $user->santri !== null
+                    ? [
+                        'nis' => $user->santri->nis,
+                        'telepon_ortu' => $user->santri->telepon_ortu,
+                    ]
+                    : null;
+                $data['nis'] = $user->santri?->nis;
+                $data['telepon_ortu'] = $user->santri?->telepon_ortu;
+
+                return $data;
+            });
 
         return response()->json([
-            'santri' => $user,
+            'santri' => $santri,
             'message' => 'Data santri berhasil diambil',
         ]);
     }
@@ -76,7 +91,10 @@ class SantriController extends Controller
      */
     public function show(Santri $santri)
     {
-        //
+        return response()->json([
+            'santri' => $santri->load('user:id,name,email,role,is_active'),
+            'message' => 'Data santri berhasil diambil',
+        ]);
     }
 
     /**

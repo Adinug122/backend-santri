@@ -61,6 +61,42 @@ Only santri can create reports, list their own reports, or toggle identity on a 
 
 Logout is available at `POST /api/auth/logout`.
 
+## Authentication and User Profile API
+
+`POST /api/auth/login` and `GET /api/user` return the same user object shape. For `santri`, `santri` contains `nis` and `telepon_ortu`; for other roles it is `null`. `GET /api/user` remains accessible while `must_change_password` is `true`, so the client can render the profile before redirecting to the change-password page.
+
+Example login response (token redacted):
+
+```json
+{
+  "access_token": "<redacted>",
+  "token_type": "Bearer",
+  "user": {
+    "id": 3,
+    "name": "Ahmad Fauzi",
+    "email": "ahmad@santri.test",
+    "email_verified_at": null,
+    "role": "santri",
+    "is_active": true,
+    "must_change_password": false,
+    "santri": {
+      "nis": "20240001",
+      "telepon_ortu": "081234567890"
+    },
+    "created_at": "2026-10-23T10:00:00.000000Z",
+    "updated_at": "2026-10-23T10:00:00.000000Z"
+  },
+  "role": "santri",
+  "dashboard": "/dashboard/santri",
+  "must_change_password": false,
+  "message": "Login berhasil"
+}
+```
+
+`GET /api/user` returns the `user` object directly, without the token and dashboard fields. New accounts created by `POST /api/admin/accounts` and new santri created by `POST /api/admin/santri/import` have `must_change_password: true`. `POST /api/auth/password` sets it to `false`.
+
+`GET /api/santri` keeps its user-list shape but now includes `nis`, `telepon_ortu`, and a nested `santri` object for each item. `GET /api/santri/{id}` returns the santri record with its `user` relation instead of an empty body.
+
 ## Notification API
 
 - `GET /api/notifications/summary` returns the number of reports with updates for the logged-in user. The response includes an `ETag`; send it back as `If-None-Match` to receive `304 Not Modified` while nothing has changed.

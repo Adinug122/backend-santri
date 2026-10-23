@@ -37,7 +37,76 @@ class AuthLoginTest extends TestCase
             ->assertOk()
             ->assertJsonPath('role', 'santri')
             ->assertJsonPath('dashboard', '/dashboard/santri')
+            ->assertJsonPath('user.santri.nis', 'S-12345')
+            ->assertJsonPath('user.santri.telepon_ortu', '081234567890')
+            ->assertJsonPath('user.must_change_password', false)
             ->assertJsonStructure(['access_token', 'token_type', 'user']);
+    }
+
+    public function test_login_response_includes_temporary_password_flag_and_santri_profile(): void
+    {
+        $user = User::create([
+            'name' => 'Santri Baru',
+            'email' => 'santri.baru.login@example.test',
+            'role' => 'santri',
+            'password' => 'password123',
+            'is_active' => true,
+            'must_change_password' => true,
+        ]);
+
+        Santri::create([
+            'users_id' => $user->id,
+            'nis' => '20240001',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'santri.baru.login@example.test',
+            'password' => 'password123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('must_change_password', true)
+            ->assertJsonPath('user.must_change_password', true)
+            ->assertJsonPath('user.santri.nis', '20240001')
+            ->assertJsonPath('user.santri.telepon_ortu', '081234567890');
+    }
+
+    public function test_user_endpoint_returns_santri_profile_and_clears_must_change_password_after_change(): void
+    {
+        $user = User::create([
+            'name' => 'Santri Profil',
+            'email' => 'santri.profil@example.test',
+            'role' => 'santri',
+            'password' => 'password123',
+            'is_active' => true,
+            'must_change_password' => true,
+        ]);
+
+        Santri::create([
+            'users_id' => $user->id,
+            'nis' => '20240002',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081298765432',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('santri.nis', '20240002')
+            ->assertJsonPath('santri.telepon_ortu', '081298765432')
+            ->assertJsonPath('must_change_password', true);
+
+        $this->postJson('/api/auth/password', [
+            'current_password' => 'password123',
+            'password' => 'PasswordBaru123',
+            'password_confirmation' => 'PasswordBaru123',
+        ])->assertOk();
+
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('must_change_password', false);
     }
 
     public function test_staff_can_login_with_email_and_get_dashboard_for_their_role(): void
@@ -64,6 +133,7 @@ class AuthLoginTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('role', 'pengurus')
+            ->assertJsonPath('user.santri', null)
             ->assertJsonPath('dashboard', '/dashboard/pengurus');
 
         $this->postJson('/api/auth/login', [
@@ -125,6 +195,7 @@ class AuthLoginTest extends TestCase
         ])->assertOk();
 
         $this->assertTrue(Hash::check('1234', $user->fresh()->password));
+        $this->assertFalse($user->fresh()->must_change_password);
     }
 
     public function test_santri_created_through_the_api_must_change_password_before_using_protected_apis(): void
@@ -147,7 +218,9 @@ class AuthLoginTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('role', 'santri')
-            ->assertJsonPath('must_change_password', true);
+            ->assertJsonPath('must_change_password', true)
+            ->assertJsonPath('user.must_change_password', true)
+            ->assertJsonPath('user.santri.nis', '20260050');
 
         $token = $login->json('access_token');
 

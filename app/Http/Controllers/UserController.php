@@ -3,12 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
 class UserController extends Controller
 {
-    public function login(Request $request)
+    public function login(Request $request): JsonResponse
     {
         $request->validate([
             'identifier' => ['required', 'string'],
@@ -37,15 +38,43 @@ class UserController extends Controller
         return response()->json([
             'access_token' => $token,
             'token_type' => 'Bearer',
-            'user' => $user,
+            'user' => $this->userPayload($user),
             'role' => $user->role,
             'dashboard' => '/dashboard/'.$user->role,
-            'must_change_password' => $user->must_change_password,
+            'must_change_password' => (bool) $user->must_change_password,
             'message' => 'Login berhasil',
         ]);
     }
 
-    public function changePassword(Request $request)
+    public function me(Request $request): JsonResponse
+    {
+        return response()->json($this->userPayload($request->user()));
+    }
+
+    private function userPayload(User $user): array
+    {
+        $user->loadMissing('santri');
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'email_verified_at' => $user->email_verified_at,
+            'role' => $user->role,
+            'is_active' => (bool) $user->is_active,
+            'must_change_password' => (bool) $user->must_change_password,
+            'santri' => $user->role === 'santri' && $user->santri !== null
+                ? [
+                    'nis' => $user->santri->nis,
+                    'telepon_ortu' => $user->santri->telepon_ortu,
+                ]
+                : null,
+            'created_at' => $user->created_at,
+            'updated_at' => $user->updated_at,
+        ];
+    }
+
+    public function changePassword(Request $request): JsonResponse
     {
         $request->validate([
             'current_password' => ['required', 'string'],
@@ -70,7 +99,7 @@ class UserController extends Controller
         ]);
     }
 
-    public function logout(Request $request)
+    public function logout(Request $request): JsonResponse
     {
         if ($request->user()) {
             $request->user()->currentAccessToken()?->delete();
