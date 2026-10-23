@@ -128,6 +128,186 @@ class NotificationApiTest extends TestCase
         $this->assertNull(Laporan::readColumnFor('perawat'));
     }
 
+    public function test_summary_returns_object_with_santri_keys(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+
+        IdentityRequest::create([
+            'laporan_id' => $report->id,
+            'users_id' => $pimpinan->id,
+            'alasan' => 'Diperlukan untuk tindak lanjut.',
+            'bukti_path' => 'identity-requests/bukti.png',
+            'status' => 'menunggu',
+        ]);
+
+        Percakapan::create([
+            'isi' => 'Mohon lengkapi informasi laporan.',
+            'pengirim_id' => $pimpinan->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Sanctum::actingAs($santri);
+
+        $data = $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertIsArray($data);
+        $this->assertFalse(array_is_list($data));
+        $this->assertSame(
+            ['permintaan_identitas', 'pesan_baru', 'status_diubah', 'pembaruan'],
+            array_keys($data),
+        );
+        $this->assertSame(1, $data['permintaan_identitas']);
+        $this->assertSame(1, $data['pesan_baru']);
+        $this->assertSame(0, $data['status_diubah']);
+        $this->assertSame(2, $data['pembaruan']);
+    }
+
+    public function test_summary_returns_object_with_staff_keys(): void
+    {
+        $this->createReport($this->createUser('santri'));
+
+        foreach (['pengurus', 'pimpinan'] as $role) {
+            Sanctum::actingAs($this->createUser($role));
+
+            $data = $this->getJson('/api/notifications/summary')
+                ->assertOk()
+                ->json('data');
+
+            $this->assertIsArray($data);
+            $this->assertFalse(array_is_list($data));
+            $this->assertSame(
+                ['laporan_baru', 'pesan_baru', 'pembaruan'],
+                array_keys($data),
+            );
+            $this->assertSame(1, $data['laporan_baru']);
+            $this->assertSame(0, $data['pesan_baru']);
+            $this->assertSame(1, $data['pembaruan']);
+        }
+    }
+
+    public function test_unauthenticated_summary_returns_json_401_without_accept_header(): void
+    {
+        $this->get('/api/notifications/summary')
+            ->assertStatus(401)
+            ->assertHeader('content-type', 'application/json')
+            ->assertJsonPath('message', 'Unauthenticated.');
+    }
+
+    public function test_every_role_marks_its_own_read_column_on_detail_and_messages(): void
+    {
+        foreach (['santri', 'pengurus', 'pimpinan'] as $role) {
+            $user = $this->createUser($role);
+            $report = $this->createReport($role === 'santri' ? $user : $this->createUser('santri'));
+
+            Sanctum::actingAs($user);
+
+            $this->getJson("/api/reports/{$report->id}")->assertOk();
+
+            $this->assertReadColumnFilledFor($report->fresh(), $role);
+        }
+
+        foreach (['santri', 'pengurus', 'pimpinan'] as $role) {
+            $user = $this->createUser($role);
+            $report = $this->createReport($role === 'santri' ? $user : $this->createUser('santri'));
+
+            Sanctum::actingAs($user);
+
+            $this->getJson("/api/reports/{$report->id}/messages")->assertOk();
+
+            $this->assertReadColumnFilledFor($report->fresh(), $role);
+        }
+    }
+
+    public function test_pimpinan_counts_all_new_reports_visible_to_staff(): void
+    {
+        $this->createReport($this->createUser('santri'));
+        $this->createReport($this->createUser('santri'));
+
+        $closed = $this->createReport($this->createUser('santri'));
+        $closed->update(['status' => 'selesai']);
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.laporan_baru', 2)
+            ->assertJsonPath('data.pembaruan', 2);
+    }
+
+    public function test_pembaruan_counts_each_reason_per_report_for_santri(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+
+        IdentityRequest::create([
+            'laporan_id' => $report->id,
+            'users_id' => $pimpinan->id,
+            'alasan' => 'Diperlukan untuk tindak lanjut.',
+            'bukti_path' => 'identity-requests/bukti.png',
+            'status' => 'menunggu',
+        ]);
+
+        Percakapan::create([
+            'isi' => 'Mohon lengkapi informasi laporan.',
+            'pengirim_id' => $pimpinan->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Laporan::whereKey($report->id)->update(['created_at' => now()->subMinute()]);
+        $report->update(['status' => 'diproses', 'status_diubah' => now()]);
+
+        Sanctum::actingAs($santri);
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas', 1)
+            ->assertJsonPath('data.pesan_baru', 1)
+            ->assertJsonPath('data.status_diubah', 1)
+            ->assertJsonPath('data.pembaruan', 3);
+    }
+
+    public function test_pembaruan_counts_each_reason_per_report_for_staff(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+
+        Percakapan::create([
+            'isi' => 'Ada informasi tambahan.',
+            'pengirim_id' => $santri->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.laporan_baru', 1)
+            ->assertJsonPath('data.pesan_baru', 1)
+            ->assertJsonPath('data.pembaruan', 2);
+    }
+
+    private function assertReadColumnFilledFor(Laporan $report, string $role): void
+    {
+        $column = Laporan::readColumnFor($role);
+
+        $this->assertNotNull($column);
+
+        if ($column === null) {
+            return;
+        }
+
+        $this->assertNotNull($report->{$column}, "Kolom {$column} belum terisi untuk role {$role}.");
+
+        foreach (array_diff(array_values(Laporan::READ_COLUMNS), [$column]) as $otherColumn) {
+            $this->assertNull($report->{$otherColumn}, "Kolom {$otherColumn} tidak boleh terisi untuk role {$role}.");
+        }
+    }
+
     private function createUser(string $role): User
     {
         static $sequence = 0;

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Laporan;
 use App\Models\User;
+use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Response;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -62,6 +64,14 @@ class NotificationController extends Controller
         ];
     }
 
+    #[Endpoint(
+        title: 'Ringkasan notifikasi',
+        description: 'Mengembalikan jumlah laporan yang memiliki pembaruan untuk pengguna yang sedang login. Kunci data bergantung pada role: santri menerima permintaan_identitas, pesan_baru, dan status_diubah; pengurus/pimpinan menerima laporan_baru dan pesan_baru. Nilai pembaruan adalah jumlah seluruh kategori, sehingga satu laporan dapat dihitung lebih dari sekali.',
+    )]
+    #[Response(
+        description: 'Ringkasan notifikasi berhasil diambil.',
+        type: "array{message: 'Berhasil mengambil notifikasi.', code: 'NOTIFICATION_FETCH_SUCCESS', data: array{permintaan_identitas?: int, pesan_baru?: int, status_diubah?: int, laporan_baru?: int, pembaruan: int}}",
+    )]
     public function summary(Request $request): JsonResponse
     {
         $queries = $this->queriesFor($request->user());
@@ -76,7 +86,7 @@ class NotificationController extends Controller
         return response()->json([
             'message' => 'Berhasil mengambil notifikasi.',
             'code' => 'NOTIFICATION_FETCH_SUCCESS',
-            'data' => $data + ['pembaruan' => $total],
+            'data' => (object) ($data + ['pembaruan' => $total]),
         ]);
     }
 
