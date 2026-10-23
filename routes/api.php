@@ -48,6 +48,8 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+    Route::get('/notifications', [NotificationController::class, 'index'])
+        ->middleware('throttle:120,1');
     Route::get('/notifications/summary', [NotificationController::class, 'summary'])
         ->middleware('throttle:120,1');
 });

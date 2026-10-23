@@ -291,6 +291,217 @@ class NotificationApiTest extends TestCase
             ->assertJsonPath('data.pembaruan', 2);
     }
 
+    public function test_notification_list_returns_one_item_per_category_per_report_for_santri(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+
+        IdentityRequest::create([
+            'laporan_id' => $report->id,
+            'users_id' => $pimpinan->id,
+            'alasan' => 'Diperlukan untuk tindak lanjut.',
+            'bukti_path' => 'identity-requests/bukti.png',
+            'status' => 'menunggu',
+        ]);
+
+        Percakapan::create([
+            'isi' => 'Mohon lengkapi informasi laporan.',
+            'pengirim_id' => $pimpinan->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Sanctum::actingAs($santri);
+
+        $response = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonPath('code', 'NOTIFICATION_LIST_SUCCESS')
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.per_page', 20)
+            ->assertJsonPath('meta.total', 2)
+            ->assertJsonPath('meta.last_page', 1)
+            ->assertJsonPath('meta.from', 1)
+            ->assertJsonPath('meta.to', 2);
+
+        $items = collect($response->json('data'))->keyBy('tipe');
+
+        $this->assertSame(['permintaan_identitas', 'pesan_baru'], $items->keys()->sort()->values()->all());
+
+        $identity = $items['permintaan_identitas'];
+        $this->assertSame("permintaan_identitas:{$report->id}", $identity['id']);
+        $this->assertSame($report->id, $identity['laporan_id']);
+        $this->assertSame($report->no_laporan, $identity['no_laporan']);
+        $this->assertSame($report->kategori, $identity['kategori']);
+        $this->assertSame('Diperlukan untuk tindak lanjut.', $identity['preview']);
+        $this->assertSame(['id' => $pimpinan->id, 'name' => $pimpinan->name, 'role' => 'pimpinan'], $identity['pengirim']);
+        $this->assertTrue($identity['status_baru']);
+        $this->assertSame("/api/reports/{$report->id}", $identity['url']);
+
+        $message = $items['pesan_baru'];
+        $this->assertSame("pesan_baru:{$report->id}", $message['id']);
+        $this->assertSame('Mohon lengkapi informasi laporan.', $message['preview']);
+        $this->assertSame($pimpinan->id, $message['pengirim']['id']);
+
+        $this->assertNull($report->fresh()->santri_dibaca);
+    }
+
+    public function test_notification_list_masks_hidden_santri_identity_for_staff(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $report->update(['tampilkan_identitas' => false]);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $response = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+
+        $item = $response->json('data.0');
+
+        $this->assertSame('laporan_baru', $item['tipe']);
+        $this->assertSame($report->id, $item['laporan_id']);
+        $this->assertNull($item['pengirim']);
+        $this->assertSame('Lampu kamar rusak.', $item['preview']);
+        $this->assertTrue($item['status_baru']);
+
+        $this->assertNull($report->fresh()->pengurus_dibaca);
+    }
+
+    public function test_notification_list_shows_identity_when_report_is_not_hidden(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $report->update(['tampilkan_identitas' => true]);
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $item = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->json('data.0');
+
+        $this->assertSame([
+            'id' => $santri->id,
+            'name' => $santri->name,
+            'role' => 'santri',
+        ], $item['pengirim']);
+    }
+
+    public function test_notification_list_is_sorted_by_latest_event(): void
+    {
+        $santri = $this->createUser('santri');
+        $older = $this->createReport($santri);
+        $newer = $this->createReport($santri);
+
+        Laporan::whereKey($older->id)->update(['created_at' => now()->subMinutes(5)]);
+        Laporan::whereKey($newer->id)->update(['created_at' => now()->subMinute()]);
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $response = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.laporan_id', $newer->id)
+            ->assertJsonPath('data.1.laporan_id', $older->id);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        $this->assertSame($ids->unique()->count(), $ids->count());
+    }
+
+    public function test_notification_list_supports_pagination(): void
+    {
+        $santri = $this->createUser('santri');
+
+        foreach (range(1, 3) as $index) {
+            $report = $this->createReport($santri);
+            Laporan::whereKey($report->id)->update(['created_at' => now()->subMinutes(10 - $index)]);
+        }
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson('/api/notifications?page=1&per_page=2')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.per_page', 2)
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.last_page', 2)
+            ->assertJsonPath('meta.from', 1)
+            ->assertJsonPath('meta.to', 2);
+
+        $this->getJson('/api/notifications?page=2&per_page=2')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.current_page', 2)
+            ->assertJsonPath('meta.from', 3)
+            ->assertJsonPath('meta.to', 3);
+    }
+
+    public function test_notification_list_and_summary_stay_in_sync_after_reading_report(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+
+        IdentityRequest::create([
+            'laporan_id' => $report->id,
+            'users_id' => $pimpinan->id,
+            'alasan' => 'Diperlukan untuk tindak lanjut.',
+            'bukti_path' => 'identity-requests/bukti.png',
+            'status' => 'menunggu',
+        ]);
+
+        Percakapan::create([
+            'isi' => 'Mohon lengkapi informasi laporan.',
+            'pengirim_id' => $pimpinan->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Sanctum::actingAs($santri);
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.pembaruan', 2);
+
+        $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 2);
+
+        $this->getJson("/api/reports/{$report->id}")->assertOk();
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.pembaruan', 0);
+
+        $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0)
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_notification_summary_supports_etag(): void
+    {
+        $this->createReport($this->createUser('santri'));
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $response = $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertHeader('ETag');
+
+        $etag = $response->headers->get('ETag');
+
+        $this->withHeader('If-None-Match', $etag)
+            ->getJson('/api/notifications/summary')
+            ->assertStatus(304);
+    }
+
+    public function test_unauthenticated_user_cannot_read_notification_list(): void
+    {
+        $this->getJson('/api/notifications')->assertUnauthorized();
+    }
+
     private function assertReadColumnFilledFor(Laporan $report, string $role): void
     {
         $column = Laporan::readColumnFor($role);
