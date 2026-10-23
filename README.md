@@ -57,7 +57,11 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 
 Every `{laporan}` path segment in the report API is the numeric `id` primary key from the report response/database, not `no_laporan`. For example, use `/api/reports/12/status` to update the report whose `id` is `12`.
 
-Only santri can create reports, list their own reports, or toggle identity on a report they own. Staff can view reports and their internal notes; santri responses omit internal notes. When a report hides identity, the owner's name is masked in staff report lists, details, and messages.
+Only santri can create reports, list their own reports, or toggle identity on a report they own. Staff can view reports and their internal notes; santri responses omit internal notes. When a report hides identity, the owner's name is masked in staff report lists, details, and messages, and `users_id` is omitted from staff payloads.
+
+`pengurus` cannot read or act on reports with category `masalah_pengurus`. The report list, notification summary, and notification list exclude those reports for `pengurus`; detail, messages, status, notes, and escalation endpoints return `403`. `pimpinan` retains full access. `permintaan_identitas` is always `null` for `pengurus`, so the reason, evidence URL, and requester are not sent to them.
+
+After a santri approves an identity request, `pimpinan` receives the reporter's real name in `user.name` (and in notification senders). Message payloads expose `pengirim.id`, `pengirim.name`, and `pengirim.role` so the client can distinguish the sender without seeing hidden names.
 
 Logout is available at `POST /api/auth/logout`.
 

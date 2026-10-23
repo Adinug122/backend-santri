@@ -45,8 +45,12 @@ class LaporanController extends Controller
             return false;
         }
 
-        if ($this->hasStaffAccess()) {
+        if ($user->role === 'pimpinan') {
             return true;
+        }
+
+        if ($user->role === 'pengurus') {
+            return ! $laporan->isRestrictedForPengurus();
         }
 
         return (int) $laporan->users_id === (int) $user->id;
@@ -73,13 +77,20 @@ class LaporanController extends Controller
             ...($includeInternalNotes ? ['catatans.user'] : []),
         ]);
 
-        $payload = $laporan->toArray();
-        unset($payload['latest_identity_request']);
-        $payload['user'] = $this->maskedUserPayload($laporan);
-        $payload['permintaan_identitas'] = $this->identityRequestPayload($laporan->latestIdentityRequest);
         $ownerId = (int) $laporan->users_id;
         $identityVisible = $laporan->tampilkan_identitas
             || $ownerId === (int) Auth::id();
+
+        $payload = $laporan->toArray();
+        unset($payload['latest_identity_request']);
+        $payload['user'] = $this->maskedUserPayload($laporan);
+        $payload['permintaan_identitas'] = Auth::user()?->role === 'pengurus'
+            ? null
+            : $this->identityRequestPayload($laporan->latestIdentityRequest);
+
+        if (! $identityVisible) {
+            unset($payload['users_id']);
+        }
 
         $payload['percakapans'] = $laporan->percakapans
             ->map(fn (Percakapan $message) => $this->messagePayload($message, $laporan, $identityVisible))
@@ -131,9 +142,11 @@ class LaporanController extends Controller
             'isi' => $message->isi,
             'laporan_id' => $message->laporan_id,
             'pengirim' => [
+                'id' => $sender?->id,
                 'name' => $isReportOwner && ! $identityVisible
                     ? 'Anonymous'
                     : ($sender?->name ?? 'Unknown'),
+                'role' => $sender?->role,
             ],
             'created_at' => $message->created_at,
             'updated_at' => $message->updated_at,
@@ -146,7 +159,9 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $laporans = Laporan::with(['user', 'catatans.user', 'latestIdentityRequest', 'percakapans.pengirim'])
+        $laporans = Laporan::query()
+            ->visibleToRole(Auth::user()?->role)
+            ->with(['user', 'catatans.user', 'latestIdentityRequest', 'percakapans.pengirim'])
             ->latest()
             ->get()
             ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, true));
@@ -280,7 +295,7 @@ class LaporanController extends Controller
 
     public function updateStatus(Request $request, Laporan $laporan)
     {
-        if (! $this->hasStaffAccess()) {
+        if (! $this->hasStaffAccess() || ! $this->canAccessReport($laporan)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -303,7 +318,7 @@ class LaporanController extends Controller
 
     public function escalate(Request $request, Laporan $laporan)
     {
-        if (! $this->hasStaffAccess()) {
+        if (! $this->hasStaffAccess() || ! $this->canAccessReport($laporan)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -378,7 +393,7 @@ class LaporanController extends Controller
 
     public function addNote(Request $request, Laporan $laporan)
     {
-        if (! $this->hasStaffAccess()) {
+        if (! $this->hasStaffAccess() || ! $this->canAccessReport($laporan)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

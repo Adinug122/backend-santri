@@ -481,6 +481,114 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('data.percakapans.0.pengirim.name', 'Anonymous');
     }
 
+    public function test_pengurus_cannot_see_or_act_on_masalah_pengurus_reports(): void
+    {
+        $owner = $this->createUser('santri');
+        $restricted = $this->createReport($owner, 'masalah_pengurus');
+        $visible = $this->createReport($owner);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $visible->id);
+
+        $this->getJson("/api/reports/{$restricted->id}")->assertForbidden();
+        $this->getJson("/api/reports/{$restricted->id}/messages")->assertForbidden();
+        $this->postJson("/api/reports/{$restricted->id}/messages", ['isi' => 'Pesan.'])->assertForbidden();
+        $this->patchJson("/api/reports/{$restricted->id}/status", ['status' => 'diproses'])->assertForbidden();
+        $this->postJson("/api/reports/{$restricted->id}/notes", ['catatan' => 'Catatan.'])->assertForbidden();
+        $this->postJson("/api/reports/{$restricted->id}/escalate", ['tujuan' => 'Pimpinan'])->assertForbidden();
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+    }
+
+    public function test_pengurus_does_not_receive_identity_request_details(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $this->submitIdentityRequest($report, $this->createUser('pimpinan'));
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.permintaan_identitas', null)
+            ->assertJsonMissingPath('data.0.latest_identity_request');
+
+        $this->getJson("/api/reports/{$report->id}")
+            ->assertOk()
+            ->assertJsonPath('data.permintaan_identitas', null);
+    }
+
+    public function test_pimpinan_receives_reporter_name_after_identity_request_is_approved(): void
+    {
+        Storage::fake('local');
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $pimpinan = $this->createUser('pimpinan');
+        $this->submitIdentityRequest($report, $pimpinan);
+
+        Sanctum::actingAs($santri);
+
+        $this->patchJson("/api/reports/{$report->id}/identity-request", [
+            'status' => 'disetujui',
+        ])->assertOk();
+
+        Sanctum::actingAs($pimpinan);
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.user.name', $santri->name);
+
+        $this->getJson("/api/reports/{$report->id}")
+            ->assertOk()
+            ->assertJsonPath('data.user.name', $santri->name)
+            ->assertJsonPath('data.permintaan_identitas.status', 'disetujui');
+    }
+
+    public function test_report_messages_include_sender_id_and_role(): void
+    {
+        $santri = $this->createUser('santri');
+        $pengurus = $this->createUser('pengurus');
+        $report = $this->createReport($santri);
+
+        Percakapan::create([
+            'isi' => 'Pesan dari santri.',
+            'pengirim_id' => $santri->id,
+            'laporan_id' => $report->id,
+        ]);
+        Percakapan::create([
+            'isi' => 'Pesan dari pengurus.',
+            'pengirim_id' => $pengurus->id,
+            'laporan_id' => $report->id,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $messages = collect(
+            $this->getJson("/api/reports/{$report->id}/messages")
+                ->assertOk()
+                ->json('data')
+        );
+
+        $santriMessage = $messages->firstWhere('pengirim.id', $santri->id);
+        $pengurusMessage = $messages->firstWhere('pengirim.id', $pengurus->id);
+
+        $this->assertNotNull($santriMessage);
+        $this->assertSame('santri', $santriMessage['pengirim']['role']);
+        $this->assertSame('Anonymous', $santriMessage['pengirim']['name']);
+
+        $this->assertNotNull($pengurusMessage);
+        $this->assertSame('pengurus', $pengurusMessage['pengirim']['role']);
+    }
+
     public function test_santri_can_set_identity_visibility_and_staff_sees_the_updated_name(): void
     {
         $owner = $this->createUser('santri');
@@ -576,7 +684,7 @@ class ReportApiTest extends TestCase
 
         $this->getJson('/api/reports')
             ->assertOk()
-            ->assertJsonPath('data.0.permintaan_identitas.status', 'dicabut')
+            ->assertJsonPath('data.0.permintaan_identitas', null)
             ->assertJsonPath('data.0.user.name', 'Anonymous');
 
         Sanctum::actingAs($this->createUser('pimpinan'));
@@ -764,12 +872,12 @@ class ReportApiTest extends TestCase
         ]);
     }
 
-    private function createReport(User $owner): Laporan
+    private function createReport(User $owner, string $category = 'Fasilitas'): Laporan
     {
         return Laporan::create([
             'users_id' => $owner->id,
             'no_laporan' => 'LAP-TEST-'.uniqid(),
-            'kategori' => 'Fasilitas',
+            'kategori' => $category,
             'isi' => 'Lampu kamar rusak.',
             'tampilkan_identitas' => false,
             'status' => 'baru',

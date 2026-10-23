@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -17,6 +18,8 @@ class Laporan extends Model
         'pengurus' => 'pengurus_dibaca',
         'pimpinan' => 'pimpinan_dibaca',
     ];
+
+    public const PENGURUS_RESTRICTED_CATEGORY = 'masalah_pengurus';
 
     protected $table = 'laporans';
 
@@ -50,6 +53,28 @@ class Laporan extends Model
     public static function readColumnFor(?string $role): ?string
     {
         return self::READ_COLUMNS[$role] ?? null;
+    }
+
+    /**
+     * Laporan masalah pengurus hanya boleh dibaca pengurus melalui endpoint lain.
+     */
+    public function isRestrictedForPengurus(): bool
+    {
+        $normalized = strtolower(str_replace([' ', '-'], '_', trim((string) $this->kategori)));
+
+        return $normalized === self::PENGURUS_RESTRICTED_CATEGORY;
+    }
+
+    public function scopeVisibleToRole(Builder $query, ?string $role): Builder
+    {
+        if ($role === 'pengurus') {
+            return $query->whereRaw(
+                "LOWER(REPLACE(REPLACE(TRIM(kategori), ' ', '_'), '-', '_')) <> ?",
+                [self::PENGURUS_RESTRICTED_CATEGORY],
+            );
+        }
+
+        return $query;
     }
 
     public function user()

@@ -66,10 +66,12 @@ class NotificationController extends Controller
 
         return [
             'laporan_baru' => Laporan::query()
+                ->visibleToRole($user->role)
                 ->where('status', 'baru')
                 ->whereNull("laporans.$kolom"),
 
             'pesan_baru' => Laporan::query()
+                ->visibleToRole($user->role)
                 ->where('status', '!=', 'selesai')
                 ->whereHas('percakapans', function (Builder $q) use ($user, $kolom): void {
                     $q->where('percakapans.pengirim_id', '!=', $user->id)

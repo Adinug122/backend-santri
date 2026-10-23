@@ -481,6 +481,40 @@ class NotificationApiTest extends TestCase
             ->assertJsonCount(0, 'data.items');
     }
 
+    public function test_pengurus_does_not_receive_masalah_pengurus_notifications(): void
+    {
+        $owner = $this->createUser('santri');
+        $restricted = $this->createReport($owner, 'masalah_pengurus');
+        $visible = $this->createReport($owner);
+        $staff = $this->createUser('pengurus');
+
+        Percakapan::create([
+            'isi' => 'Pesan pada laporan terbatas.',
+            'pengirim_id' => $staff->id,
+            'laporan_id' => $restricted->id,
+        ]);
+        Percakapan::create([
+            'isi' => 'Pesan pada laporan biasa.',
+            'pengirim_id' => $staff->id,
+            'laporan_id' => $visible->id,
+        ]);
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.laporan_baru', 1)
+            ->assertJsonPath('data.pesan_baru', 1);
+
+        $items = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.items')
+            ->json('data.items');
+
+        $this->assertNotContains($restricted->id, array_column($items, 'laporan_id'));
+        $this->assertContains($visible->id, array_column($items, 'laporan_id'));
+    }
+
     public function test_status_change_notification_exposes_the_new_status(): void
     {
         $santri = $this->createUser('santri');
@@ -555,7 +589,7 @@ class NotificationApiTest extends TestCase
         ]);
     }
 
-    private function createReport(User $owner): Laporan
+    private function createReport(User $owner, string $category = 'Fasilitas'): Laporan
     {
         static $sequence = 0;
         $sequence++;
@@ -563,7 +597,7 @@ class NotificationApiTest extends TestCase
         return Laporan::create([
             'users_id' => $owner->id,
             'no_laporan' => 'LAP-NOTIF-'.$sequence,
-            'kategori' => 'Fasilitas',
+            'kategori' => $category,
             'isi' => 'Lampu kamar rusak.',
             'tampilkan_identitas' => false,
             'status' => 'baru',
