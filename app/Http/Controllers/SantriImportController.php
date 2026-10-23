@@ -25,16 +25,25 @@ class SantriImportController extends Controller
         'nis',
         'jenis_kelamin',
         'telepon_ortu',
+    ];
+
+    /**
+     * Header lama dengan kolom password, masih diterima agar file sebelumnya tetap bisa diimport.
+     */
+    private const PASSWORD_HEADERS = [
+        ...self::HEADERS,
         'password',
     ];
 
     /**
-     * Header lama yang masih diterima agar file export versi sebelumnya tetap bisa diimport.
+     * Header lama dengan id_santri dan password, masih diterima untuk kompatibilitas.
      */
     private const LEGACY_EXPORT_HEADERS = [
         'id_santri',
-        ...self::HEADERS,
+        ...self::PASSWORD_HEADERS,
     ];
+
+    private const DEFAULT_PASSWORD = '12345678';
 
     /**
      * Lebar kolom yang sama untuk file export dan template.
@@ -47,7 +56,6 @@ class SantriImportController extends Controller
         'C' => 18,
         'D' => 16,
         'E' => 22,
-        'F' => 28,
     ];
 
     public function export(): StreamedResponse|JsonResponse
@@ -73,12 +81,11 @@ class SantriImportController extends Controller
                         $sheet->setCellValueExplicit('C'.$rowNumber, $santri->nis ?? '', DataType::TYPE_STRING);
                         $sheet->setCellValueExplicit('D'.$rowNumber, $santri->jenis_kelamin, DataType::TYPE_STRING);
                         $sheet->setCellValueExplicit('E'.$rowNumber, $santri->telepon_ortu, DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('F'.$rowNumber, '', DataType::TYPE_STRING);
                         $rowNumber++;
                     }
                 });
 
-            $this->applySheetLayout($sheet, 'F');
+            $this->applySheetLayout($sheet, 'E');
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
         }, 'data-santri.xlsx', [
@@ -98,13 +105,13 @@ class SantriImportController extends Controller
             $sheet->setTitle('Data Santri');
             $sheet->fromArray(self::HEADERS, null, 'A1');
             $sheet->fromArray([
-                ['Nama Santri', 'santri@example.test', '20260001', 'laki', '081234567890', 'Pass1234'],
+                ['Nama Santri', 'santri@example.test', '20260001', 'laki', '081234567890'],
             ], null, 'A2');
             $sheet->fromArray([
-                ['Password wajib diisi untuk santri baru; kosongkan untuk santri lama jika tidak ingin mengubah password.'],
-                ['Santri yang baru dibuat wajib mengganti passwordnya setelah login pertama.'],
+                ['Password santri baru otomatis dibuat 12345678 dan wajib diganti setelah login pertama.'],
+                ['Password santri yang sudah ada tidak berubah saat import.'],
             ], null, 'A4');
-            $this->applySheetLayout($sheet, 'F');
+            $this->applySheetLayout($sheet, 'E');
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
         }, 'template-import-santri.xlsx', [
@@ -165,13 +172,20 @@ class SantriImportController extends Controller
         );
 
         $hasSantriIds = $headers === self::LEGACY_EXPORT_HEADERS;
+        $hasPasswordColumn = $hasSantriIds || $headers === self::PASSWORD_HEADERS;
 
-        if (! $hasSantriIds && $headers !== self::HEADERS) {
+        if (! $hasPasswordColumn && $headers !== self::HEADERS) {
             return response()->json([
                 'message' => 'Header Excel tidak sesuai template.',
                 'required_headers' => self::HEADERS,
             ], 422);
         }
+
+        $columnHeaders = match (true) {
+            $hasSantriIds => self::LEGACY_EXPORT_HEADERS,
+            $hasPasswordColumn => self::PASSWORD_HEADERS,
+            default => self::HEADERS,
+        };
 
         $previewRows = [];
         $importRows = [];
@@ -182,7 +196,6 @@ class SantriImportController extends Controller
 
         foreach ($rows as $index => $values) {
             $rowNumber = $index + 2;
-            $columnHeaders = $hasSantriIds ? self::LEGACY_EXPORT_HEADERS : self::HEADERS;
             $row = array_combine($columnHeaders, array_pad(array_slice($values, 0, count($columnHeaders)), count($columnHeaders), null));
 
             if (collect($row)->every(fn ($value) => trim((string) $value) === '')) {
@@ -190,6 +203,7 @@ class SantriImportController extends Controller
             }
 
             $row = array_map(fn ($value) => trim((string) $value), $row);
+            $row['password'] = $hasPasswordColumn && $row['password'] !== '' ? $row['password'] : null;
             $santriId = $hasSantriIds && $row['id_santri'] !== '' ? $row['id_santri'] : null;
             $existingSantri = $hasSantriIds
                 ? ($santriId !== null && ctype_digit($santriId)
@@ -214,16 +228,14 @@ class SantriImportController extends Controller
                 ],
                 'jenis_kelamin' => ['required', 'in:laki,perempuan'],
                 'telepon_ortu' => ['required', 'string', 'min:10', 'max:20'],
-                'password' => [
-                    $existingSantri === null ? 'required' : 'nullable',
-                    'string',
-                    'min:4',
-                    'max:255',
-                ],
             ];
 
             if ($hasSantriIds) {
                 $rules['id_santri'] = ['nullable', 'integer', Rule::exists('santris', 'id')];
+            }
+
+            if ($hasPasswordColumn) {
+                $rules['password'] = ['nullable', 'string', 'min:4', 'max:255'];
             }
 
             $validator = Validator::make($row, $rules);
@@ -259,7 +271,7 @@ class SantriImportController extends Controller
                 'nis' => $row['nis'],
                 'jenis_kelamin' => $row['jenis_kelamin'],
                 'telepon_ortu' => $row['telepon_ortu'],
-                'password' => $row['password'],
+                'password' => $row['password'] ?? '',
             ];
 
             $previewRows[] = [
@@ -302,7 +314,7 @@ class SantriImportController extends Controller
                     $user->name = $row['name'];
                     $user->email = $row['email'];
 
-                    if ($row['password'] !== '') {
+                    if (($row['password'] ?? '') !== '') {
                         $user->password = $row['password'];
                     }
 
@@ -321,7 +333,7 @@ class SantriImportController extends Controller
                     'name' => $row['name'],
                     'email' => $row['email'],
                     'role' => 'santri',
-                    'password' => $row['password'],
+                    'password' => ($row['password'] ?? '') !== '' ? $row['password'] : self::DEFAULT_PASSWORD,
                     'is_active' => true,
                     'must_change_password' => true,
                 ]);

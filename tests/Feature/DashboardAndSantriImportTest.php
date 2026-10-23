@@ -249,14 +249,13 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertSame('nis', $sheet->getCell('C1')->getValue());
         $this->assertSame('jenis_kelamin', $sheet->getCell('D1')->getValue());
         $this->assertSame('telepon_ortu', $sheet->getCell('E1')->getValue());
-        $this->assertSame('password', $sheet->getCell('F1')->getValue());
-        $this->assertNull($sheet->getCell('G1')->getValue());
+        $this->assertNull($sheet->getCell('F1')->getValue());
 
         $spreadsheet->disconnectWorksheets();
         unlink($path);
     }
 
-    public function test_pimpinan_can_export_santri_without_ids_and_blank_passwords(): void
+    public function test_pimpinan_can_export_santri_without_ids_or_passwords(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
         $santriUser = $this->createUser('santri', 'santri.export@example.test');
@@ -282,8 +281,7 @@ class DashboardAndSantriImportTest extends TestCase
         $this->assertSame('nis', $sheet->getCell('C1')->getValue());
         $this->assertSame('jenis_kelamin', $sheet->getCell('D1')->getValue());
         $this->assertSame('telepon_ortu', $sheet->getCell('E1')->getValue());
-        $this->assertSame('password', $sheet->getCell('F1')->getValue());
-        $this->assertNull($sheet->getCell('G1')->getValue());
+        $this->assertNull($sheet->getCell('F1')->getValue());
         $this->assertSame($santriUser->name, $sheet->getCell('A2')->getValue());
         $this->assertSame($santriUser->email, $sheet->getCell('B2')->getValue());
         $this->assertSame('20260010', $sheet->getCell('C2')->getValue());
@@ -302,7 +300,7 @@ class DashboardAndSantriImportTest extends TestCase
         $template = $this->downloadWorkbook('/api/admin/santri/template');
         $export = $this->downloadWorkbook('/api/admin/santri/export');
 
-        foreach (['A', 'B', 'C', 'D', 'E', 'F'] as $column) {
+        foreach (['A', 'B', 'C', 'D', 'E'] as $column) {
             $this->assertSame(
                 $template->getActiveSheet()->getColumnDimension($column)->getWidth(),
                 $export->getActiveSheet()->getColumnDimension($column)->getWidth(),
@@ -327,8 +325,8 @@ class DashboardAndSantriImportTest extends TestCase
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
         $makeFile = fn () => $this->createWorkbook([
-            ['Siti Test', 'siti.test@example.test', '20260002', 'perempuan', '081234567891', 'TempPassword123'],
-        ]);
+            ['Siti Test', 'siti.test@example.test', '20260002', 'perempuan', '081234567891'],
+        ], false, false);
 
         $this->post('/api/admin/santri/import', [
             'action' => 'preview',
@@ -352,11 +350,10 @@ class DashboardAndSantriImportTest extends TestCase
             'nis' => '20260002',
             'jenis_kelamin' => 'perempuan',
         ]);
-        $this->assertDatabaseHas('users', [
-            'email' => 'siti.test@example.test',
-            'role' => 'santri',
-            'must_change_password' => true,
-        ]);
+        $importedUser = User::where('email', 'siti.test@example.test')->firstOrFail();
+        $this->assertSame('santri', $importedUser->role);
+        $this->assertTrue($importedUser->must_change_password);
+        $this->assertTrue(Hash::check('12345678', $importedUser->password));
     }
 
     public function test_import_updates_santri_by_id_without_changing_blank_password_or_deleting_missing_rows(): void
@@ -431,8 +428,8 @@ class DashboardAndSantriImportTest extends TestCase
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
             'file' => $this->createWorkbook([
-                ['Invalid Email', 'Bukan Email', '20260003', 'perempuan', '081234567892', 'TempPassword123'],
-            ]),
+                ['Invalid Email', 'Bukan Email', '20260003', 'perempuan', '081234567892'],
+            ], false, false),
         ], ['Accept' => 'application/json'])
             ->assertUnprocessable()
             ->assertJsonPath('errors.0.row', 2);
@@ -447,8 +444,8 @@ class DashboardAndSantriImportTest extends TestCase
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
             'file' => $this->createWorkbook([
-                ['Password Test', 'password.test@example.test', '20260004', 'laki', '081234567893', 'TempPassword123'],
-            ]),
+                ['Password Test', 'password.test@example.test', '20260004', 'laki', '081234567893'],
+            ], false, false),
         ], ['Accept' => 'application/json'])->assertCreated();
 
         $santri = User::where('email', 'password.test@example.test')->firstOrFail();
@@ -457,6 +454,7 @@ class DashboardAndSantriImportTest extends TestCase
             'id' => $santri->id,
             'must_change_password' => true,
         ]);
+        $this->assertTrue(Hash::check('12345678', $santri->password));
 
         Sanctum::actingAs($santri);
 
@@ -465,7 +463,7 @@ class DashboardAndSantriImportTest extends TestCase
             ->assertJsonPath('code', 'PASSWORD_CHANGE_REQUIRED');
 
         $this->postJson('/api/auth/password', [
-            'current_password' => 'TempPassword123',
+            'current_password' => '12345678',
             'password' => 'PasswordBaru123',
             'password_confirmation' => 'PasswordBaru123',
         ])->assertOk();
@@ -532,7 +530,6 @@ class DashboardAndSantriImportTest extends TestCase
         $sheet->setCellValue('C3', '20260033');
         $sheet->setCellValue('D3', 'perempuan');
         $sheet->setCellValue('E3', '081234567899');
-        $sheet->setCellValue('F3', 'PasswordBaru123');
 
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
@@ -585,9 +582,9 @@ class DashboardAndSantriImportTest extends TestCase
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
             'file' => $this->createWorkbook([
-                ['Nama Baru Via NIS', 'by.nis.baru@example.test', '20260060', 'laki', '081234567892', ''],
-                ['Nama Baru Via Email', 'by.email@example.test', '20260070', 'perempuan', '081234567893', ''],
-            ]),
+                ['Nama Baru Via NIS', 'by.nis.baru@example.test', '20260060', 'laki', '081234567892'],
+                ['Nama Baru Via Email', 'by.email@example.test', '20260070', 'perempuan', '081234567893'],
+            ], false, false),
         ], ['Accept' => 'application/json'])
             ->assertCreated()
             ->assertJsonPath('imported', 2)
@@ -638,8 +635,8 @@ class DashboardAndSantriImportTest extends TestCase
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
             'file' => $this->createWorkbook([
-                ['Konflik Pemilik', 'pemilik.email@example.test', '20260040', 'laki', '081234567892', 'TempPassword123'],
-            ]),
+                ['Konflik Pemilik', 'pemilik.email@example.test', '20260040', 'laki', '081234567892'],
+            ], false, false),
         ], ['Accept' => 'application/json'])
             ->assertUnprocessable()
             ->assertJsonPath('errors.0.row', 2)
@@ -684,16 +681,21 @@ class DashboardAndSantriImportTest extends TestCase
         ]);
     }
 
-    private function createWorkbook(array $dataRows, bool $includeSantriIds = false): UploadedFile
+    private function createWorkbook(array $dataRows, bool $includeSantriIds = false, bool $includePassword = true): UploadedFile
     {
+        $headers = ['name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu'];
+
+        if ($includePassword) {
+            $headers[] = 'password';
+        }
+
+        if ($includeSantriIds) {
+            array_unshift($headers, 'id_santri');
+        }
+
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray([
-            $includeSantriIds
-                ? ['id_santri', 'name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password']
-                : ['name', 'email', 'nis', 'jenis_kelamin', 'telepon_ortu', 'password'],
-            ...$dataRows,
-        ]);
+        $sheet->fromArray([$headers, ...$dataRows]);
 
         return $this->uploadWorkbook($spreadsheet);
     }
