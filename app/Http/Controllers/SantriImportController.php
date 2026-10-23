@@ -13,6 +13,7 @@ use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -27,9 +28,26 @@ class SantriImportController extends Controller
         'password',
     ];
 
-    private const EXPORT_HEADERS = [
+    /**
+     * Header lama yang masih diterima agar file export versi sebelumnya tetap bisa diimport.
+     */
+    private const LEGACY_EXPORT_HEADERS = [
         'id_santri',
         ...self::HEADERS,
+    ];
+
+    /**
+     * Lebar kolom yang sama untuk file export dan template.
+     *
+     * @var array<string, float>
+     */
+    private const COLUMN_WIDTHS = [
+        'A' => 28,
+        'B' => 32,
+        'C' => 18,
+        'D' => 16,
+        'E' => 22,
+        'F' => 28,
     ];
 
     public function export(): StreamedResponse|JsonResponse
@@ -42,7 +60,7 @@ class SantriImportController extends Controller
             $spreadsheet = new Spreadsheet;
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Data Santri');
-            $sheet->fromArray(self::EXPORT_HEADERS, null, 'A1');
+            $sheet->fromArray(self::HEADERS, null, 'A1');
 
             $rowNumber = 2;
             Santri::query()
@@ -50,18 +68,17 @@ class SantriImportController extends Controller
                 ->orderBy('id')
                 ->chunk(500, function ($santris) use ($sheet, &$rowNumber): void {
                     foreach ($santris as $santri) {
-                        $sheet->setCellValueExplicit('A'.$rowNumber, (string) $santri->id, DataType::TYPE_NUMERIC);
-                        $sheet->setCellValueExplicit('B'.$rowNumber, $santri->user?->name ?? '', DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('C'.$rowNumber, $santri->user?->email ?? '', DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('D'.$rowNumber, $santri->nis ?? '', DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('E'.$rowNumber, $santri->jenis_kelamin, DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('F'.$rowNumber, $santri->telepon_ortu, DataType::TYPE_STRING);
-                        $sheet->setCellValueExplicit('G'.$rowNumber, '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('A'.$rowNumber, $santri->user?->name ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('B'.$rowNumber, $santri->user?->email ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('C'.$rowNumber, $santri->nis ?? '', DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('D'.$rowNumber, $santri->jenis_kelamin, DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('E'.$rowNumber, $santri->telepon_ortu, DataType::TYPE_STRING);
+                        $sheet->setCellValueExplicit('F'.$rowNumber, '', DataType::TYPE_STRING);
                         $rowNumber++;
                     }
                 });
 
-            $sheet->getStyle('A1:G1')->getFont()->setBold(true);
+            $this->applySheetLayout($sheet, 'F');
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
         }, 'data-santri.xlsx', [
@@ -87,12 +104,38 @@ class SantriImportController extends Controller
                 ['Password wajib diisi untuk santri baru; kosongkan untuk santri lama jika tidak ingin mengubah password.'],
                 ['Santri yang baru dibuat wajib mengganti passwordnya setelah login pertama.'],
             ], null, 'A4');
-            $sheet->getStyle('A1:F1')->getFont()->setBold(true);
+            $this->applySheetLayout($sheet, 'F');
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
         }, 'template-import-santri.xlsx', [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    /**
+     * Cari santri yang sudah ada berdasarkan NIS atau email saat file tidak menyertakan id_santri.
+     */
+    private function findExistingSantri(string $nis, string $email): ?Santri
+    {
+        $byNis = Santri::with('user')->where('nis', $nis)->first();
+        $byEmail = Santri::with('user')
+            ->whereHas('user', fn ($query) => $query->where('email', $email))
+            ->first();
+
+        if ($byNis !== null && $byEmail !== null && $byNis->id !== $byEmail->id) {
+            return null;
+        }
+
+        return $byNis ?? $byEmail;
+    }
+
+    private function applySheetLayout(Worksheet $sheet, string $lastColumn): void
+    {
+        foreach (self::COLUMN_WIDTHS as $column => $width) {
+            $sheet->getColumnDimension($column)->setWidth($width);
+        }
+
+        $sheet->getStyle("A1:{$lastColumn}1")->getFont()->setBold(true);
     }
 
     public function import(Request $request): JsonResponse
@@ -121,7 +164,7 @@ class SantriImportController extends Controller
             array_shift($rows) ?? [],
         );
 
-        $hasSantriIds = $headers === self::EXPORT_HEADERS;
+        $hasSantriIds = $headers === self::LEGACY_EXPORT_HEADERS;
 
         if (! $hasSantriIds && $headers !== self::HEADERS) {
             return response()->json([
@@ -139,7 +182,7 @@ class SantriImportController extends Controller
 
         foreach ($rows as $index => $values) {
             $rowNumber = $index + 2;
-            $columnHeaders = $hasSantriIds ? self::EXPORT_HEADERS : self::HEADERS;
+            $columnHeaders = $hasSantriIds ? self::LEGACY_EXPORT_HEADERS : self::HEADERS;
             $row = array_combine($columnHeaders, array_pad(array_slice($values, 0, count($columnHeaders)), count($columnHeaders), null));
 
             if (collect($row)->every(fn ($value) => trim((string) $value) === '')) {
@@ -148,12 +191,14 @@ class SantriImportController extends Controller
 
             $row = array_map(fn ($value) => trim((string) $value), $row);
             $santriId = $hasSantriIds && $row['id_santri'] !== '' ? $row['id_santri'] : null;
-            $existingSantri = $santriId !== null && ctype_digit($santriId)
-                ? Santri::with('user')->find((int) $santriId)
-                : null;
+            $existingSantri = $hasSantriIds
+                ? ($santriId !== null && ctype_digit($santriId)
+                    ? Santri::with('user')->find((int) $santriId)
+                    : null)
+                : $this->findExistingSantri($row['nis'], $row['email']);
+            $recordId = $existingSantri?->id ?? $santriId;
 
-            $validator = Validator::make($row, [
-                'id_santri' => ['nullable', 'integer', Rule::exists('santris', 'id')],
+            $rules = [
                 'name' => ['required', 'string', 'max:255'],
                 'email' => [
                     'required',
@@ -175,7 +220,13 @@ class SantriImportController extends Controller
                     'min:4',
                     'max:255',
                 ],
-            ]);
+            ];
+
+            if ($hasSantriIds) {
+                $rules['id_santri'] = ['nullable', 'integer', Rule::exists('santris', 'id')];
+            }
+
+            $validator = Validator::make($row, $rules);
             $rowErrors = $validator->errors()->toArray();
             $emailKey = strtolower($row['email']);
 
@@ -187,14 +238,14 @@ class SantriImportController extends Controller
                 $rowErrors['nis'][] = 'NIS duplikat di dalam file.';
             }
 
-            if ($santriId !== null && isset($seenSantriIds[$santriId])) {
+            if ($recordId !== null && isset($seenSantriIds[$recordId])) {
                 $rowErrors['id_santri'][] = 'ID santri duplikat di dalam file.';
             }
 
             $seenEmails[$emailKey] = true;
             $seenNis[$row['nis']] = true;
-            if ($santriId !== null) {
-                $seenSantriIds[$santriId] = true;
+            if ($recordId !== null) {
+                $seenSantriIds[$recordId] = true;
             }
 
             if ($rowErrors !== []) {
@@ -213,7 +264,7 @@ class SantriImportController extends Controller
 
             $previewRows[] = [
                 'row' => $rowNumber,
-                'id_santri' => $santriId,
+                'id_santri' => $existingSantri?->id,
                 'name' => $row['name'],
                 'email' => $row['email'],
                 'nis' => $row['nis'],

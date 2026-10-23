@@ -75,9 +75,9 @@ The dashboard and santri import endpoints require a Bearer token from a `pimpina
 - `GET /api/dashboard/summary` returns santri and report totals grouped by status and category.
 - `GET /api/admin/accounts` lists account details without exposing passwords.
 - `PATCH /api/admin/accounts/{userId}/status` toggles an account's active status. Deactivating an account revokes its tokens; the current and last active pimpinan accounts cannot be deactivated.
-- `GET /api/admin/santri/export` downloads current santri data as Excel, including `id_santri` for updates and a blank password column.
-- `GET /api/admin/santri/template` downloads the Excel template.
-- `POST /api/admin/santri/import` accepts an `.xlsx` file and an `action` of `preview` or `import`. Preview does not save data; import revalidates the uploaded workbook and saves only if every non-empty row is valid. Upload the same workbook again with `action=import` after reviewing the preview. Files exported with `id_santri` update matching santri; rows without that ID create new santri. Santri missing from the file are not deleted.
+- `GET /api/admin/santri/export` downloads current santri data as Excel with a blank password column. It does not include `id_santri`, so IDs are never shown to users.
+- `GET /api/admin/santri/template` downloads the Excel template. Export and template use the same column widths.
+- `POST /api/admin/santri/import` accepts an `.xlsx` file and an `action` of `preview` or `import`. Preview does not save data; import revalidates the uploaded workbook and saves only if every non-empty row is valid. Upload the same workbook again with `action=import` after reviewing the preview. Rows without `id_santri` are matched to existing santri by `nis` or `email`; unmatched rows are created with an auto-generated ID. Legacy files that still contain `id_santri` continue to update by that ID. Santri missing from the file are not deleted.
 
 The template columns remain `name`, `email`, `nis`, `jenis_kelamin`, `telepon_ortu`, and `password`. Password is required for new santri and must contain at least 4 characters; leave it blank for existing santri to retain the current password. Newly created santri are not required to change their password at first login. Each import is limited to 500 rows and 5 MB.
 

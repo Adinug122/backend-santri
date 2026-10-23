@@ -256,11 +256,11 @@ class DashboardAndSantriImportTest extends TestCase
         unlink($path);
     }
 
-    public function test_pimpinan_can_export_santri_with_update_ids_and_blank_passwords(): void
+    public function test_pimpinan_can_export_santri_without_ids_and_blank_passwords(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
         $santriUser = $this->createUser('santri', 'santri.export@example.test');
-        $santri = Santri::create([
+        Santri::create([
             'users_id' => $santriUser->id,
             'nis' => '20260010',
             'jenis_kelamin' => 'laki',
@@ -277,19 +277,41 @@ class DashboardAndSantriImportTest extends TestCase
         $spreadsheet = IOFactory::load($path);
         $sheet = $spreadsheet->getActiveSheet();
 
-        $this->assertSame('id_santri', $sheet->getCell('A1')->getValue());
-        $this->assertSame('name', $sheet->getCell('B1')->getValue());
-        $this->assertSame('email', $sheet->getCell('C1')->getValue());
-        $this->assertSame('nis', $sheet->getCell('D1')->getValue());
-        $this->assertSame('jenis_kelamin', $sheet->getCell('E1')->getValue());
-        $this->assertSame('telepon_ortu', $sheet->getCell('F1')->getValue());
-        $this->assertSame('password', $sheet->getCell('G1')->getValue());
-        $this->assertSame((string) $santri->id, (string) $sheet->getCell('A2')->getValue());
-        $this->assertSame($santriUser->name, $sheet->getCell('B2')->getValue());
-        $this->assertNull($sheet->getCell('G2')->getValue());
+        $this->assertSame('name', $sheet->getCell('A1')->getValue());
+        $this->assertSame('email', $sheet->getCell('B1')->getValue());
+        $this->assertSame('nis', $sheet->getCell('C1')->getValue());
+        $this->assertSame('jenis_kelamin', $sheet->getCell('D1')->getValue());
+        $this->assertSame('telepon_ortu', $sheet->getCell('E1')->getValue());
+        $this->assertSame('password', $sheet->getCell('F1')->getValue());
+        $this->assertNull($sheet->getCell('G1')->getValue());
+        $this->assertSame($santriUser->name, $sheet->getCell('A2')->getValue());
+        $this->assertSame($santriUser->email, $sheet->getCell('B2')->getValue());
+        $this->assertSame('20260010', $sheet->getCell('C2')->getValue());
+        $this->assertSame('laki', $sheet->getCell('D2')->getValue());
+        $this->assertSame('081234567890', $sheet->getCell('E2')->getValue());
+        $this->assertNull($sheet->getCell('F2')->getValue());
 
         $spreadsheet->disconnectWorksheets();
         unlink($path);
+    }
+
+    public function test_export_and_template_use_the_same_column_widths(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+
+        $template = $this->downloadWorkbook('/api/admin/santri/template');
+        $export = $this->downloadWorkbook('/api/admin/santri/export');
+
+        foreach (['A', 'B', 'C', 'D', 'E', 'F'] as $column) {
+            $this->assertSame(
+                $template->getActiveSheet()->getColumnDimension($column)->getWidth(),
+                $export->getActiveSheet()->getColumnDimension($column)->getWidth(),
+                "Lebar kolom {$column} berbeda antara template dan export.",
+            );
+        }
+
+        $template->disconnectWorksheets();
+        $export->disconnectWorksheets();
     }
 
     public function test_non_pimpinan_cannot_access_santri_import_endpoints(): void
@@ -503,15 +525,14 @@ class DashboardAndSantriImportTest extends TestCase
 
         $workbook = $this->exportWorkbook();
         $sheet = $workbook->getActiveSheet();
-        $sheet->setCellValue('B2', 'Nama Hasil Edit');
-        $sheet->setCellValue('D2', '20260032');
-        $sheet->setCellValue('A3', null);
-        $sheet->setCellValue('B3', 'Santri Baru Dari File');
-        $sheet->setCellValue('C3', 'baru.dari.file@example.test');
-        $sheet->setCellValue('D3', '20260033');
-        $sheet->setCellValue('E3', 'perempuan');
-        $sheet->setCellValue('F3', '081234567899');
-        $sheet->setCellValue('G3', 'PasswordBaru123');
+        $sheet->setCellValue('A2', 'Nama Hasil Edit');
+        $sheet->setCellValue('C2', '20260032');
+        $sheet->setCellValue('A3', 'Santri Baru Dari File');
+        $sheet->setCellValue('B3', 'baru.dari.file@example.test');
+        $sheet->setCellValue('C3', '20260033');
+        $sheet->setCellValue('D3', 'perempuan');
+        $sheet->setCellValue('E3', '081234567899');
+        $sheet->setCellValue('F3', 'PasswordBaru123');
 
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
@@ -541,42 +562,99 @@ class DashboardAndSantriImportTest extends TestCase
         ]);
     }
 
-    public function test_import_rejects_rows_whose_email_or_nis_belongs_to_another_santri(): void
+    public function test_idless_import_updates_santri_matched_by_nis_or_email(): void
     {
         Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
-        $otherUser = $this->createUser('santri', 'pemilik@example.test');
-        $otherSantri = Santri::create([
-            'users_id' => $otherUser->id,
+        $byNisUser = $this->createUser('santri', 'by.nis@example.test');
+        $byNis = Santri::create([
+            'users_id' => $byNisUser->id,
+            'nis' => '20260060',
+            'jenis_kelamin' => 'laki',
+            'telepon_ortu' => '081234567890',
+        ]);
+        $byEmailUser = $this->createUser('santri', 'by.email@example.test');
+        $byEmail = Santri::create([
+            'users_id' => $byEmailUser->id,
+            'nis' => '20260050',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081234567891',
+        ]);
+        $byNisPassword = $byNisUser->password;
+        $byEmailPassword = $byEmailUser->password;
+
+        $this->post('/api/admin/santri/import', [
+            'action' => 'import',
+            'file' => $this->createWorkbook([
+                ['Nama Baru Via NIS', 'by.nis.baru@example.test', '20260060', 'laki', '081234567892', ''],
+                ['Nama Baru Via Email', 'by.email@example.test', '20260070', 'perempuan', '081234567893', ''],
+            ]),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('imported', 2)
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('updated', 2);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $byNisUser->id,
+            'name' => 'Nama Baru Via NIS',
+            'email' => 'by.nis.baru@example.test',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $byNis->id,
+            'nis' => '20260060',
+            'telepon_ortu' => '081234567892',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'id' => $byEmailUser->id,
+            'name' => 'Nama Baru Via Email',
+        ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $byEmail->id,
+            'nis' => '20260070',
+            'telepon_ortu' => '081234567893',
+        ]);
+        $this->assertSame($byNisPassword, $byNisUser->fresh()->password);
+        $this->assertSame($byEmailPassword, $byEmailUser->fresh()->password);
+    }
+
+    public function test_idless_import_rejects_conflicting_nis_and_email_owners(): void
+    {
+        Sanctum::actingAs($this->createUser('pimpinan', 'pimpinan@example.test'));
+        $nisOwnerUser = $this->createUser('santri', 'pemilik.nis@example.test');
+        $nisOwner = Santri::create([
+            'users_id' => $nisOwnerUser->id,
             'nis' => '20260040',
             'jenis_kelamin' => 'laki',
             'telepon_ortu' => '081234567890',
         ]);
+        $emailOwnerUser = $this->createUser('santri', 'pemilik.email@example.test');
+        $emailOwner = Santri::create([
+            'users_id' => $emailOwnerUser->id,
+            'nis' => '20260041',
+            'jenis_kelamin' => 'perempuan',
+            'telepon_ortu' => '081234567891',
+        ]);
 
         $this->post('/api/admin/santri/import', [
             'action' => 'import',
             'file' => $this->createWorkbook([
-                ['Email Duplikat', 'pemilik@example.test', '20260041', 'laki', '081234567891', 'TempPassword123'],
+                ['Konflik Pemilik', 'pemilik.email@example.test', '20260040', 'laki', '081234567892', 'TempPassword123'],
             ]),
         ], ['Accept' => 'application/json'])
             ->assertUnprocessable()
             ->assertJsonPath('errors.0.row', 2)
-            ->assertJsonPath('errors.0.errors.email.0', 'The email has already been taken.');
-
-        $this->post('/api/admin/santri/import', [
-            'action' => 'import',
-            'file' => $this->createWorkbook([
-                ['NIS Duplikat', 'nis.duplikat@example.test', '20260040', 'laki', '081234567891', 'TempPassword123'],
-            ]),
-        ], ['Accept' => 'application/json'])
-            ->assertUnprocessable()
-            ->assertJsonPath('errors.0.row', 2)
+            ->assertJsonPath('errors.0.errors.email.0', 'The email has already been taken.')
             ->assertJsonPath('errors.0.errors.nis.0', 'The nis has already been taken.');
 
-        $this->assertDatabaseMissing('users', ['email' => 'nis.duplikat@example.test']);
         $this->assertDatabaseHas('santris', [
-            'id' => $otherSantri->id,
+            'id' => $nisOwner->id,
             'nis' => '20260040',
         ]);
+        $this->assertDatabaseHas('santris', [
+            'id' => $emailOwner->id,
+            'nis' => '20260041',
+        ]);
+        $this->assertDatabaseMissing('users', ['name' => 'Konflik Pemilik']);
     }
 
     private function createUser(string $role, string $email): User
@@ -622,8 +700,13 @@ class DashboardAndSantriImportTest extends TestCase
 
     private function exportWorkbook(): Spreadsheet
     {
-        $response = $this->get('/api/admin/santri/export')->assertOk();
-        $path = tempnam(sys_get_temp_dir(), 'santri-export-');
+        return $this->downloadWorkbook('/api/admin/santri/export');
+    }
+
+    private function downloadWorkbook(string $url): Spreadsheet
+    {
+        $response = $this->get($url)->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'santri-download-');
         file_put_contents($path, $response->streamedContent());
         $spreadsheet = IOFactory::load($path);
         unlink($path);
