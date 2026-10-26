@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\NotificationController;
@@ -20,6 +21,8 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [UserController::class, 'me']);
     Route::post('/auth/logout', [UserController::class, 'logout']);
+    Route::post('/chat', [ChatController::class, 'send'])
+        ->middleware('throttle:20,1');
 });
 
 // test auto deploy
