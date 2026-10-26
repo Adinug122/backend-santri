@@ -455,3 +455,5 @@ Tidak ada endpoint `PUT`, `PATCH`, atau `DELETE` untuk audit log.
 | `POST` | `/reports/{id}/identity-request` | pimpinan + pengawas | Hanya untuk laporan yang boleh diakses; body `alasan` wajib, `bukti` opsional (jpg/jpeg/png/pdf, maks 10 MB). |
 | `PATCH` | `/reports/{id}/identity-request` | pemilik (santri) | Body `{ "status": "disetujui" \| "ditolak" \| 1 \| 0 }`. |
 | `PATCH` | `/reports/{id}/identity` | pemilik (santri) | Toggle atau set `tampilkan_identitas`. |
+
+

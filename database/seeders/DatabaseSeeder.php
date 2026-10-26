@@ -17,6 +17,8 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call(PengawasSeeder::class);
+
         // --- Users ---
         $pimpinan = User::create([
             'name' => 'Pimpinan Pondok',
@@ -31,14 +33,6 @@ class DatabaseSeeder extends Seeder
             'email' => 'pengurus@santri.test',
             'password' => Hash::make('password'),
             'role' => 'pengurus',
-            'is_active' => true,
-        ]);
-
-        User::create([
-            'name' => 'Pengawas Yayasan',
-            'email' => 'pengawas@santri.test',
-            'password' => Hash::make('password'),
-            'role' => 'pengawas',
             'is_active' => true,
         ]);
 
