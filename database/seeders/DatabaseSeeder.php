@@ -19,43 +19,51 @@ class DatabaseSeeder extends Seeder
     {
         // --- Users ---
         $pimpinan = User::create([
-            'name'      => 'Pimpinan Pondok',
-            'email'     => 'pimpinan@santri.test',
-            'password'  => Hash::make('password'),
-            'role'      => 'pimpinan',
+            'name' => 'Pimpinan Pondok',
+            'email' => 'pimpinan@santri.test',
+            'password' => Hash::make('password'),
+            'role' => 'pimpinan',
             'is_active' => true,
         ]);
 
         $pengurus = User::create([
-            'name'      => 'Pengurus Pondok',
-            'email'     => 'pengurus@santri.test',
-            'password'  => Hash::make('password'),
-            'role'      => 'pengurus',
+            'name' => 'Pengurus Pondok',
+            'email' => 'pengurus@santri.test',
+            'password' => Hash::make('password'),
+            'role' => 'pengurus',
+            'is_active' => true,
+        ]);
+
+        User::create([
+            'name' => 'Pengawas Yayasan',
+            'email' => 'pengawas@santri.test',
+            'password' => Hash::make('password'),
+            'role' => 'pengawas',
             'is_active' => true,
         ]);
 
         $santriUser1 = User::create([
-            'name'      => 'Ahmad Fauzi',
-            'email'     => 'ahmad@santri.test',
-            'password'  => Hash::make('password'),
-            'role'      => 'santri',
+            'name' => 'Ahmad Fauzi',
+            'email' => 'ahmad@santri.test',
+            'password' => Hash::make('password'),
+            'role' => 'santri',
             'is_active' => true,
         ]);
 
         $santriUser2 = User::create([
-            'name'      => 'Siti Aisyah',
-            'email'     => 'siti@santri.test',
-            'password'  => Hash::make('password'),
-            'role'      => 'santri',
+            'name' => 'Siti Aisyah',
+            'email' => 'siti@santri.test',
+            'password' => Hash::make('password'),
+            'role' => 'santri',
             'is_active' => true,
         ]);
 
         $reactPimpinan = User::firstOrCreate(
             ['email' => 'react.pimpinan@santri.test'],
             [
-                'name'      => 'React Pimpinan',
-                'password'  => Hash::make('password'),
-                'role'      => 'pimpinan',
+                'name' => 'React Pimpinan',
+                'password' => Hash::make('password'),
+                'role' => 'pimpinan',
                 'is_active' => true,
             ]
         );
@@ -63,9 +71,9 @@ class DatabaseSeeder extends Seeder
         $reactPengurus = User::firstOrCreate(
             ['email' => 'react.pengurus@santri.test'],
             [
-                'name'      => 'React Pengurus',
-                'password'  => Hash::make('password'),
-                'role'      => 'pengurus',
+                'name' => 'React Pengurus',
+                'password' => Hash::make('password'),
+                'role' => 'pengurus',
                 'is_active' => true,
             ]
         );
@@ -73,9 +81,9 @@ class DatabaseSeeder extends Seeder
         $reactSantriUser = User::firstOrCreate(
             ['email' => 'react.santri@santri.test'],
             [
-                'name'      => 'React Santri',
-                'password'  => Hash::make('password'),
-                'role'      => 'santri',
+                'name' => 'React Santri',
+                'password' => Hash::make('password'),
+                'role' => 'santri',
                 'is_active' => true,
             ]
         );
@@ -84,94 +92,94 @@ class DatabaseSeeder extends Seeder
         Santri::firstOrCreate(
             ['users_id' => $santriUser1->id],
             [
-                'nis'           => '2024001',
+                'nis' => '2024001',
                 'jenis_kelamin' => 'laki',
-                'telepon_ortu'  => '081234567890',
+                'telepon_ortu' => '081234567890',
             ]
         );
 
         Santri::firstOrCreate(
             ['users_id' => $santriUser2->id],
             [
-                'nis'           => '2024002',
+                'nis' => '2024002',
                 'jenis_kelamin' => 'perempuan',
-                'telepon_ortu'  => '089876543210',
+                'telepon_ortu' => '089876543210',
             ]
         );
 
         Santri::firstOrCreate(
             ['users_id' => $reactSantriUser->id],
             [
-                'nis'           => '2024100',
+                'nis' => '2024100',
                 'jenis_kelamin' => 'laki',
-                'telepon_ortu'  => '081111223344',
+                'telepon_ortu' => '081111223344',
             ]
         );
 
         // --- Laporans ---
         $laporan1 = Laporan::create([
-            'no_laporan'          => 'LAP-001',
-            'kategori'            => 'Keamanan',
-            'isi'                 => 'Ada santri yang keluar asrama tanpa izin pada malam hari.',
+            'no_laporan' => 'LAP-001',
+            'kategori' => 'Keamanan',
+            'isi' => 'Ada santri yang keluar asrama tanpa izin pada malam hari.',
             'tampilkan_identitas' => false,
-            'status'              => 'baru',
-            'waktu'               => now()->subDays(3),
+            'status' => 'baru',
+            'waktu' => now()->subDays(3),
         ]);
 
         $laporan2 = Laporan::create([
-            'no_laporan'          => 'LAP-002',
-            'kategori'            => 'Fasilitas',
-            'isi'                 => 'Toilet kamar mandi blok B rusak dan tidak bisa digunakan.',
+            'no_laporan' => 'LAP-002',
+            'kategori' => 'Fasilitas',
+            'isi' => 'Toilet kamar mandi blok B rusak dan tidak bisa digunakan.',
             'tampilkan_identitas' => true,
-            'status'              => 'diproses',
-            'waktu'               => now()->subDays(1),
+            'status' => 'diproses',
+            'waktu' => now()->subDays(1),
         ]);
 
         $laporan3 = Laporan::create([
-            'no_laporan'          => 'LAP-003',
-            'kategori'            => 'Kesehatan',
-            'isi'                 => 'Beberapa santri mengeluhkan makanan yang kurang bergizi.',
+            'no_laporan' => 'LAP-003',
+            'kategori' => 'Kesehatan',
+            'isi' => 'Beberapa santri mengeluhkan makanan yang kurang bergizi.',
             'tampilkan_identitas' => false,
-            'status'              => 'selesai',
-            'waktu'               => now()->subDays(7),
+            'status' => 'selesai',
+            'waktu' => now()->subDays(7),
         ]);
 
         // --- Catatans ---
         Catatan::create([
-            'catatan'    => 'Laporan sudah diteruskan ke bagian keamanan untuk ditindaklanjuti.',
-            'users_id'   => $pengurus->id,
+            'catatan' => 'Laporan sudah diteruskan ke bagian keamanan untuk ditindaklanjuti.',
+            'users_id' => $pengurus->id,
             'laporan_id' => $laporan1->id,
         ]);
 
         Catatan::create([
-            'catatan'    => 'Teknisi sudah dipanggil untuk memperbaiki fasilitas.',
-            'users_id'   => $pengurus->id,
+            'catatan' => 'Teknisi sudah dipanggil untuk memperbaiki fasilitas.',
+            'users_id' => $pengurus->id,
             'laporan_id' => $laporan2->id,
         ]);
 
         Catatan::create([
-            'catatan'    => 'Sudah dikomunikasikan dengan bagian dapur dan diselesaikan.',
-            'users_id'   => $pimpinan->id,
+            'catatan' => 'Sudah dikomunikasikan dengan bagian dapur dan diselesaikan.',
+            'users_id' => $pimpinan->id,
             'laporan_id' => $laporan3->id,
         ]);
 
         // --- Percakapans ---
         Percakapan::create([
-            'isi'         => 'Terima kasih sudah melapor, kami akan segera menindaklanjuti.',
+            'isi' => 'Terima kasih sudah melapor, kami akan segera menindaklanjuti.',
             'pengirim_id' => $pengurus->id,
-            'laporan_id'  => $laporan1->id,
+            'laporan_id' => $laporan1->id,
         ]);
 
         Percakapan::create([
-            'isi'         => 'Apakah ada informasi tambahan mengenai waktu kejadian?',
+            'isi' => 'Apakah ada informasi tambahan mengenai waktu kejadian?',
             'pengirim_id' => $pengurus->id,
-            'laporan_id'  => $laporan1->id,
+            'laporan_id' => $laporan1->id,
         ]);
 
         Percakapan::create([
-            'isi'         => 'Perbaikan dijadwalkan besok pagi.',
+            'isi' => 'Perbaikan dijadwalkan besok pagi.',
             'pengirim_id' => $pengurus->id,
-            'laporan_id'  => $laporan2->id,
+            'laporan_id' => $laporan2->id,
         ]);
     }
 }

@@ -53,6 +53,11 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
+## Dokumentasi Fitur Tata Kelola
+
+- Kontrak API peran `pengawas`, laporan sensitif, persetujuan penonaktifan, dan audit log: [`docs/api-pengawas.md`](docs/api-pengawas.md)
+- Prompt kerja frontend: [`docs/prompt-frontend-pengawas.md`](docs/prompt-frontend-pengawas.md)
+
 ## Report API Identifiers
 
 Every `{laporan}` path segment in the report API is the numeric `id` primary key from the report response/database, not `no_laporan`. For example, use `/api/reports/12/status` to update the report whose `id` is `12`.
@@ -64,6 +69,23 @@ Only santri can create reports, list their own reports, or toggle identity on a 
 After a santri approves an identity request, `pimpinan` receives the reporter's real name in `user.name` (and in notification senders). Message payloads expose `pengirim.id`, `pengirim.name`, and `pengirim.role` so the client can distinguish the sender without seeing hidden names.
 
 Logout is available at `POST /api/auth/logout`.
+
+## Peran Pengawas dan Laporan Menyangkut Pimpinan
+
+`POST /api/reports` accepts `menyangkut_pimpinan` (boolean, default `false`). A report with this flag is only visible to its owner and to the `pengawas` role. `pimpinan` and `pengurus` receive `403` on the list, detail, messages, status, notes, escalation, and identity-request endpoints, and the report is excluded from their notifications and dashboard summary.
+
+`pengawas` accounts are intentionally not creatable through the API. Create them through the seeder or directly in the database so that a `pimpinan` cannot appoint their own supervisor. Pengawas can read and handle only flagged reports and can read audit logs; they cannot manage accounts, create reports, or use santri endpoints.
+
+## Deactivation Approval and Audit Log
+
+`PATCH /api/admin/accounts/{userId}/status` still toggles activation, but `pimpinan` cannot deactivate an account that has open reports (`status != selesai`) or any `pengawas` account. For accounts with open reports, use the two-person flow:
+
+- `POST /api/admin/accounts/{userId}/deactivation-requests` (`pimpinan`) with `reason`; returns `409` when a pending request already exists.
+- `GET /api/admin/deactivation-requests?status=menunggu` (`pengawas` sees all, `pimpinan` sees their own).
+- `PATCH /api/admin/deactivation-requests/{id}` (`pengawas`) with `status` `disetujui`/`ditolak` and optional `catatan`. Approval deactivates the account, revokes its tokens, and writes audit entries in one transaction.
+
+`GET /api/admin/audit-logs` (`pengawas` only) lists append-only audit entries with filters `action`, `actor_id`, `subject_type`, `subject_id`, `from`, `to`, and `per_page`. There are no update or delete endpoints for audit entries; enforce that at the database level in production by granting the application user no `UPDATE` or `DELETE` privilege on `audit_logs`.
+
 
 ## Authentication and User Profile API
 
@@ -110,11 +132,11 @@ Example login response (token redacted):
 
 ## Dashboard and Santri Import API
 
-The dashboard and santri import endpoints require a Bearer token from a `pimpinan` account:
+The dashboard and santri import endpoints require a Bearer token from a `pimpinan` account, except `GET /api/dashboard/summary`, which is also available to `pengawas` with counts limited to flagged reports:
 
-- `GET /api/dashboard/summary` returns santri and report totals grouped by status and category.
+- `GET /api/dashboard/summary` returns santri and report totals grouped by status and category. `pimpinan` counts exclude reports flagged `menyangkut_pimpinan`; `pengawas` counts include only those reports.
 - `GET /api/admin/accounts` lists account details without exposing passwords.
-- `PATCH /api/admin/accounts/{userId}/status` toggles an account's active status. Deactivating an account revokes its tokens; the current and last active pimpinan accounts cannot be deactivated.
+- `PATCH /api/admin/accounts/{userId}/status` toggles an account's active status. Deactivating an account revokes its tokens; the current and last active pimpinan accounts cannot be deactivated, `pengawas` accounts cannot be deactivated from the app, and accounts with open reports require the approval flow described in the previous section.
 - `GET /api/admin/santri/export` downloads current santri data as Excel without `id_santri` or `password`, so IDs and credentials are never shown to users.
 - `GET /api/admin/santri/template` downloads the Excel template. Export and template use the same columns and column widths.
 - `POST /api/admin/santri/import` accepts an `.xlsx` file and an `action` of `preview` or `import`. Preview does not save data; import revalidates the uploaded workbook and saves only if every non-empty row is valid. Upload the same workbook again with `action=import` after reviewing the preview. Rows without `id_santri` are matched to existing santri by `nis` or `email`; unmatched rows are created with an auto-generated ID. Legacy files that still contain `id_santri` or `password` remain supported. Santri missing from the file are not deleted.

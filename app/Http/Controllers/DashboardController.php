@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\Laporan;
 use App\Models\Santri;
 use App\Models\User;
@@ -15,16 +16,20 @@ class DashboardController extends Controller
 {
     public function summary(): JsonResponse
     {
-        if (Auth::user()?->role !== 'pimpinan') {
+        $role = Auth::user()?->role;
+
+        if (! in_array($role, ['pimpinan', 'pengawas'], true)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         $statusCounts = Laporan::query()
+            ->visibleToRole($role)
             ->select('status', DB::raw('count(*) as total'))
             ->groupBy('status')
             ->pluck('total', 'status');
 
         $categoryCounts = Laporan::query()
+            ->visibleToRole($role)
             ->select('kategori', DB::raw('count(*) as total'))
             ->groupBy('kategori')
             ->orderBy('kategori')
@@ -37,7 +42,7 @@ class DashboardController extends Controller
         return response()->json([
             'data' => [
                 'total_santri' => Santri::count(),
-                'total_laporan' => Laporan::count(),
+                'total_laporan' => Laporan::query()->visibleToRole($role)->count(),
                 'laporan_per_status' => [
                     'baru' => (int) ($statusCounts['baru'] ?? 0),
                     'diproses' => (int) ($statusCounts['diproses'] ?? 0),
@@ -122,6 +127,12 @@ class DashboardController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        if ($user->role === 'pengawas') {
+            return response()->json([
+                'message' => 'Akun pengawas tidak dapat diubah statusnya dari aplikasi.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         if ($user->role === 'pimpinan' && $user->is_active) {
             $activeLeaders = User::query()
                 ->where('role', 'pimpinan')
@@ -135,12 +146,25 @@ class DashboardController extends Controller
             }
         }
 
+        if ($user->is_active && $user->hasOpenReports()) {
+            return response()->json([
+                'message' => 'Akun masih memiliki laporan terbuka. Nonaktifkan melalui pengajuan persetujuan pengawas.',
+                'requires_approval' => true,
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
         $user->is_active = ! $user->is_active;
         $user->save();
 
         if (! $user->is_active) {
             $user->tokens()->delete();
         }
+
+        AuditLog::record(
+            $user->is_active ? AuditLog::ACCOUNT_ACTIVATED : AuditLog::ACCOUNT_DEACTIVATED,
+            $user,
+            ['role' => $user->role],
+        );
 
         return response()->json([
             'data' => [

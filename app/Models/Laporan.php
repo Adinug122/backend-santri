@@ -17,6 +17,7 @@ class Laporan extends Model
         'santri' => 'santri_dibaca',
         'pengurus' => 'pengurus_dibaca',
         'pimpinan' => 'pimpinan_dibaca',
+        'pengawas' => 'pengawas_dibaca',
     ];
 
     public const PENGURUS_RESTRICTED_CATEGORY = 'masalah_pengurus';
@@ -29,22 +30,26 @@ class Laporan extends Model
         'kategori',
         'isi',
         'tampilkan_identitas',
+        'menyangkut_pimpinan',
         'status',
         'status_diubah',
         'santri_dibaca',
         'pengurus_dibaca',
         'pimpinan_dibaca',
+        'pengawas_dibaca',
         'waktu',
     ];
 
     protected $casts = [
         'tampilkan_identitas' => 'boolean',
+        'menyangkut_pimpinan' => 'boolean',
         'waktu' => 'datetime',
         'status' => 'string',
         'status_diubah' => 'datetime',
         'santri_dibaca' => 'datetime',
         'pengurus_dibaca' => 'datetime',
         'pimpinan_dibaca' => 'datetime',
+        'pengawas_dibaca' => 'datetime',
     ];
 
     /**
@@ -65,16 +70,24 @@ class Laporan extends Model
         return $normalized === self::PENGURUS_RESTRICTED_CATEGORY;
     }
 
+    public function isMenyangkutPimpinan(): bool
+    {
+        return (bool) $this->menyangkut_pimpinan;
+    }
+
     public function scopeVisibleToRole(Builder $query, ?string $role): Builder
     {
-        if ($role === 'pengurus') {
-            return $query->whereRaw(
-                "LOWER(REPLACE(REPLACE(TRIM(kategori), ' ', '_'), '-', '_')) <> ?",
-                [self::PENGURUS_RESTRICTED_CATEGORY],
-            );
-        }
-
-        return $query;
+        return match ($role) {
+            'pengurus' => $query
+                ->where('menyangkut_pimpinan', false)
+                ->whereRaw(
+                    "LOWER(REPLACE(REPLACE(TRIM(kategori), ' ', '_'), '-', '_')) <> ?",
+                    [self::PENGURUS_RESTRICTED_CATEGORY],
+                ),
+            'pimpinan' => $query->where('menyangkut_pimpinan', false),
+            'pengawas' => $query->where('menyangkut_pimpinan', true),
+            default => $query,
+        };
     }
 
     public function user()

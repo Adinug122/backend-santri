@@ -13,10 +13,10 @@ use Laravel\Sanctum\HasApiTokens;
 
 #[Fillable(['name', 'email', 'role', 'password', 'is_active', 'must_change_password'])]
 #[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable 
+class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable,HasApiTokens;
+    use HasApiTokens, HasFactory,Notifiable;
 
     /**
      * Get the attributes that should be cast.
@@ -46,5 +46,18 @@ class User extends Authenticatable
     public function percakapans()
     {
         return $this->hasMany(Percakapan::class, 'pengirim_id');
+    }
+
+    public function deactivationRequests()
+    {
+        return $this->hasMany(AccountDeactivationRequest::class, 'user_id');
+    }
+
+    public function hasOpenReports(): bool
+    {
+        return Laporan::query()
+            ->where('users_id', $this->id)
+            ->where('status', '!=', 'selesai')
+            ->exists();
     }
 }

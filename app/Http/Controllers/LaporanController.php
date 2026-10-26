@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\Catatan;
 use App\Models\IdentityRequest;
 use App\Models\Laporan;
@@ -20,7 +21,7 @@ class LaporanController extends Controller
     {
         $role = Auth::user()?->role;
 
-        return in_array($role, ['pengurus', 'pimpinan'], true);
+        return in_array($role, ['pengurus', 'pimpinan', 'pengawas'], true);
     }
 
     /**
@@ -46,11 +47,15 @@ class LaporanController extends Controller
         }
 
         if ($user->role === 'pimpinan') {
-            return true;
+            return ! $laporan->isMenyangkutPimpinan();
         }
 
         if ($user->role === 'pengurus') {
-            return ! $laporan->isRestrictedForPengurus();
+            return ! $laporan->isMenyangkutPimpinan() && ! $laporan->isRestrictedForPengurus();
+        }
+
+        if ($user->role === 'pengawas') {
+            return $laporan->isMenyangkutPimpinan();
         }
 
         return (int) $laporan->users_id === (int) $user->id;
@@ -182,6 +187,7 @@ class LaporanController extends Controller
             'kategori' => ['required', 'string', 'max:255'],
             'isi' => ['required', 'string', 'max:10000'],
             'tampilkan_identitas' => ['nullable', 'boolean'],
+            'menyangkut_pimpinan' => ['nullable', 'boolean'],
         ]);
 
         try {
@@ -191,6 +197,7 @@ class LaporanController extends Controller
                 'kategori' => $request->kategori,
                 'isi' => $request->isi,
                 'tampilkan_identitas' => (bool) $request->boolean('tampilkan_identitas', true),
+                'menyangkut_pimpinan' => (bool) $request->boolean('menyangkut_pimpinan', false),
                 'status' => 'baru',
                 'waktu' => now(),
             ]);
@@ -233,6 +240,13 @@ class LaporanController extends Controller
         }
 
         $this->markAsRead($laporan);
+
+        if ($this->hasStaffAccess()) {
+            AuditLog::record(AuditLog::REPORT_VIEWED, $laporan, [
+                'role' => Auth::user()?->role,
+                'menyangkut_pimpinan' => $laporan->isMenyangkutPimpinan(),
+            ]);
+        }
 
         return response()->json([
             'data' => $this->reportPayload($laporan->fresh(), $this->hasStaffAccess()),
@@ -287,9 +301,15 @@ class LaporanController extends Controller
             }
         });
 
+        $updatedLaporan = $laporan->fresh();
+
+        AuditLog::record(AuditLog::IDENTITY_TOGGLED, $updatedLaporan, [
+            'tampilkan_identitas' => (bool) $updatedLaporan->tampilkan_identitas,
+        ]);
+
         return response()->json([
             'message' => 'Status tampilan identitas berhasil diubah',
-            'laporan' => $this->reportPayload($laporan->fresh(), false),
+            'laporan' => $this->reportPayload($updatedLaporan, false),
         ]);
     }
 
@@ -304,9 +324,16 @@ class LaporanController extends Controller
         ]);
 
         if ($laporan->status !== $request->status) {
+            $statusLama = $laporan->status;
+
             $laporan->update([
                 'status_diubah' => now(),
                 'status' => $request->status,
+            ]);
+
+            AuditLog::record(AuditLog::REPORT_STATUS_CHANGED, $laporan, [
+                'from' => $statusLama,
+                'to' => $request->status,
             ]);
         }
 
@@ -327,15 +354,18 @@ class LaporanController extends Controller
             'keterangan' => ['nullable', 'string'],
         ]);
 
-        $note = trim(sprintf('Eskalasi ke %s%s', $request->tujuan, $request->keterangan ? ': '.$request->keterangan : ''));
-
-        Catatan::create([
-            'catatan' => $note,
+        $note = Catatan::create([
+            'catatan' => trim(sprintf('Eskalasi ke %s%s', $request->tujuan, $request->keterangan ? ': '.$request->keterangan : '')),
             'users_id' => Auth::id(),
             'laporan_id' => $laporan->id,
         ]);
 
         $laporan->update(['status' => 'diproses', 'status_diubah' => now()]);
+
+        AuditLog::record(AuditLog::REPORT_ESCALATED, $laporan, [
+            'tujuan' => $request->tujuan,
+            'catatan_id' => $note->id,
+        ]);
 
         return response()->json([
             'message' => 'Eskalasi berhasil dicatat',
@@ -381,6 +411,13 @@ class LaporanController extends Controller
             'laporan_id' => $laporan->id,
         ]);
 
+        if ($this->hasStaffAccess()) {
+            AuditLog::record(AuditLog::REPORT_MESSAGE_SENT, $laporan, [
+                'message_id' => $message->id,
+                'role' => Auth::user()?->role,
+            ]);
+        }
+
         return response()->json([
             'message' => 'Pesan berhasil dikirim',
             'data' => $this->messagePayload(
@@ -407,6 +444,10 @@ class LaporanController extends Controller
             'laporan_id' => $laporan->id,
         ]);
 
+        AuditLog::record(AuditLog::REPORT_NOTE_ADDED, $laporan, [
+            'catatan_id' => $note->id,
+        ]);
+
         return response()->json([
             'message' => 'Catatan internal berhasil ditambahkan',
             'data' => $note->load('user'),
@@ -423,7 +464,12 @@ class LaporanController extends Controller
 
     public function identityRequest(Request $request, Laporan $laporan): JsonResponse
     {
-        if (Auth::user()?->role !== 'pimpinan') {
+        $user = Auth::user();
+
+        if (
+            ! in_array($user?->role, ['pimpinan', 'pengawas'], true)
+            || ! $this->canAccessReport($laporan)
+        ) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -458,6 +504,11 @@ class LaporanController extends Controller
                 'users_id' => Auth::id(),
                 'alasan' => $validated['alasan'],
                 'bukti_path' => $evidencePath,
+                'status' => 'menunggu',
+            ]);
+
+            AuditLog::record(AuditLog::IDENTITY_REQUESTED, $laporan, [
+                'identity_request_id' => $identityRequest->id,
                 'status' => 'menunggu',
             ]);
 
@@ -509,6 +560,11 @@ class LaporanController extends Controller
                 ]);
                 $laporan->update([
                     'tampilkan_identitas' => $identityStatus === 'disetujui',
+                ]);
+
+                AuditLog::record(AuditLog::IDENTITY_RESPONDED, $laporan, [
+                    'identity_request_id' => $identityRequest->id,
+                    'status' => $identityStatus,
                 ]);
             });
 

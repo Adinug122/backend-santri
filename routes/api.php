@@ -1,7 +1,9 @@
 <?php
 
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DeactivationRequestController;
 use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SantriController;
@@ -31,6 +33,10 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/admin/accounts', [DashboardController::class, 'account']);
     Route::post('/admin/accounts', [DashboardController::class, 'storeAccount']);
     Route::patch('/admin/accounts/{user}/status', [DashboardController::class, 'isActiveAccount'])->whereNumber('user');
+    Route::post('/admin/accounts/{user}/deactivation-requests', [DeactivationRequestController::class, 'store'])->whereNumber('user');
+    Route::get('/admin/deactivation-requests', [DeactivationRequestController::class, 'index']);
+    Route::patch('/admin/deactivation-requests/{deactivationRequest}', [DeactivationRequestController::class, 'update'])->whereNumber('deactivationRequest');
+    Route::get('/admin/audit-logs', [AuditLogController::class, 'index']);
     Route::get('/admin/santri/export', [SantriImportController::class, 'export']);
     Route::get('/admin/santri/template', [SantriImportController::class, 'template']);
     Route::post('/admin/santri/import', [SantriImportController::class, 'import']);
