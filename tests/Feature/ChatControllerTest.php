@@ -74,6 +74,7 @@ class ChatControllerTest extends TestCase
             ->assertJsonPath('data.reply', 'Saya dengarkan');
         Http::assertSentCount(2);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.groq.com/openai/v1/chat/completions'
+            && $request['model'] === 'openai/gpt-oss-20b'
             && $request['messages'][1]['role'] === 'assistant'
             && $request['messages'][1]['content'] === 'Tentu, silakan.');
     }

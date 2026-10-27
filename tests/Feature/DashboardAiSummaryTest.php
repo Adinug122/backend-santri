@@ -134,7 +134,7 @@ class DashboardAiSummaryTest extends TestCase
 
         Http::assertSentCount(2);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.groq.com/openai/v1/chat/completions'
-            && $request['model'] === 'llama-3.3-70b-versatile');
+            && $request['model'] === 'openai/gpt-oss-20b');
     }
 
     public function test_returns_503_when_ai_providers_are_unavailable(): void

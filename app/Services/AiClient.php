@@ -5,12 +5,13 @@ namespace App\Services;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class AiClient
 {
     private const GEMINI_MODEL = 'gemini-3.5-flash';
 
-    private const GROQ_MODEL = 'llama-3.3-70b-versatile';
+    private const GROQ_MODEL = 'openai/gpt-oss-20b';
 
     public function askJson(string $systemPrompt, string $userText): ?array
     {
@@ -65,7 +66,7 @@ class AiClient
         }
 
         try {
-            return Http::withHeaders(['x-goog-api-key' => $apiKey])
+            $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
                 ->timeout(30)
                 ->post(
                     'https://generativelanguage.googleapis.com/v1beta/models/'.self::GEMINI_MODEL.':generateContent',
@@ -75,6 +76,17 @@ class AiClient
                         'generationConfig' => ['responseMimeType' => 'application/json'],
                     ],
                 );
+
+            if (! $response->successful()) {
+                Log::warning('AI provider request failed.', [
+                    'provider' => 'gemini',
+                    'model' => self::GEMINI_MODEL,
+                    'status' => $response->status(),
+                    'error_status' => $response->json('error.status'),
+                ]);
+            }
+
+            return $response;
         } catch (ConnectionException $exception) {
             report($exception);
 
@@ -94,7 +106,7 @@ class AiClient
         }
 
         try {
-            return Http::withToken($apiKey)
+            $response = Http::withToken($apiKey)
                 ->timeout(30)
                 ->post('https://api.groq.com/openai/v1/chat/completions', [
                     'model' => self::GROQ_MODEL,
@@ -104,6 +116,17 @@ class AiClient
                     ],
                     'response_format' => ['type' => 'json_object'],
                 ]);
+
+            if (! $response->successful()) {
+                Log::warning('AI provider request failed.', [
+                    'provider' => 'groq',
+                    'model' => self::GROQ_MODEL,
+                    'status' => $response->status(),
+                    'error_code' => $response->json('error.code'),
+                ]);
+            }
+
+            return $response;
         } catch (ConnectionException $exception) {
             report($exception);
 
