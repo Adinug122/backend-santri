@@ -79,12 +79,11 @@ class Laporan extends Model
     {
         return match ($role) {
             'pengurus' => $query
-                ->where('menyangkut_pimpinan', false)
                 ->whereRaw(
                     "LOWER(REPLACE(REPLACE(TRIM(kategori), ' ', '_'), '-', '_')) <> ?",
                     [self::PENGURUS_RESTRICTED_CATEGORY],
                 ),
-            'pimpinan' => $query->where('menyangkut_pimpinan', false),
+            'pimpinan' => $query,
             'pengawas' => $query->where('menyangkut_pimpinan', true),
             default => $query,
         };

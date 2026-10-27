@@ -44,7 +44,7 @@ class PengawasReportAccessTest extends TestCase
         ]);
     }
 
-    public function test_pimpinan_cannot_see_or_act_on_reports_about_themselves(): void
+    public function test_pimpinan_can_see_and_act_on_flagged_reports_without_the_flag(): void
     {
         $owner = $this->createUser('santri');
         $flagged = $this->createReport($owner, true);
@@ -53,38 +53,52 @@ class PengawasReportAccessTest extends TestCase
 
         $this->getJson('/api/reports')
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $regular->id);
+            ->assertJsonCount(2, 'data')
+            ->assertJsonMissingPath('data.0.menyangkut_pimpinan');
 
-        $this->getJson("/api/reports/{$flagged->id}")->assertForbidden();
-        $this->getJson("/api/reports/{$flagged->id}/messages")->assertForbidden();
-        $this->postJson("/api/reports/{$flagged->id}/messages", ['isi' => 'Pesan.'])->assertForbidden();
-        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])->assertForbidden();
-        $this->postJson("/api/reports/{$flagged->id}/notes", ['catatan' => 'Catatan.'])->assertForbidden();
-        $this->postJson("/api/reports/{$flagged->id}/escalate", ['tujuan' => 'Yayasan'])->assertForbidden();
-        $this->postJson("/api/reports/{$flagged->id}/identity-request", ['alasan' => 'Ingin tahu.'])->assertForbidden();
+        $this->getJson("/api/reports/{$flagged->id}")
+            ->assertOk()
+            ->assertJsonMissingPath('data.menyangkut_pimpinan');
+        $this->getJson("/api/reports/{$flagged->id}/messages")->assertOk();
+        $this->postJson("/api/reports/{$flagged->id}/messages", ['isi' => 'Pesan.'])->assertCreated();
+        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])
+            ->assertOk()
+            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+        $this->postJson("/api/reports/{$flagged->id}/notes", ['catatan' => 'Catatan.'])->assertCreated();
+        $this->postJson("/api/reports/{$flagged->id}/escalate", ['tujuan' => 'Yayasan'])
+            ->assertOk()
+            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+        $this->postJson("/api/reports/{$flagged->id}/identity-request", ['alasan' => 'Ingin tahu.'])
+            ->assertCreated()
+            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
 
-        $this->assertDatabaseHas('laporans', [
-            'id' => $flagged->id,
-            'status' => 'baru',
-        ]);
-        $this->assertDatabaseCount('identity_requests', 0);
+        $this->assertDatabaseHas('laporans', ['id' => $flagged->id, 'status' => 'diproses']);
+        $this->assertDatabaseHas('laporans', ['id' => $regular->id]);
+        $this->assertDatabaseCount('identity_requests', 1);
     }
 
-    public function test_pengurus_cannot_see_flagged_reports(): void
+    public function test_pengurus_can_see_flagged_reports_without_the_flag_but_not_restricted_reports(): void
     {
         $owner = $this->createUser('santri');
         $flagged = $this->createReport($owner, true);
         $regular = $this->createReport($owner);
+        $restricted = $this->createReport($owner);
+        $restricted->update(['kategori' => 'masalah_pengurus']);
         Sanctum::actingAs($this->createUser('pengurus'));
 
         $this->getJson('/api/reports')
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $regular->id);
+            ->assertJsonCount(2, 'data')
+            ->assertJsonMissingPath('data.0.menyangkut_pimpinan');
 
-        $this->getJson("/api/reports/{$flagged->id}")->assertForbidden();
-        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])->assertForbidden();
+        $this->getJson("/api/reports/{$flagged->id}")
+            ->assertOk()
+            ->assertJsonMissingPath('data.menyangkut_pimpinan');
+        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])
+            ->assertOk()
+            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+        $this->getJson("/api/reports/{$restricted->id}")->assertForbidden();
+        $this->assertDatabaseHas('laporans', ['id' => $regular->id]);
     }
 
     public function test_pengawas_only_lists_and_opens_flagged_reports(): void
@@ -169,7 +183,7 @@ class PengawasReportAccessTest extends TestCase
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/dashboard/summary')
             ->assertOk()
-            ->assertJsonPath('data.total_laporan', 2);
+            ->assertJsonPath('data.total_laporan', 3);
 
         Sanctum::actingAs($this->createUser('pengawas'));
         $this->getJson('/api/dashboard/summary')
@@ -189,7 +203,7 @@ class PengawasReportAccessTest extends TestCase
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/notifications/summary')
             ->assertOk()
-            ->assertJsonPath('data.laporan_baru', 1);
+            ->assertJsonPath('data.laporan_baru', 2);
 
         Sanctum::actingAs($this->createUser('pengawas'));
         $this->getJson('/api/notifications/summary')
@@ -205,7 +219,7 @@ class PengawasReportAccessTest extends TestCase
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/notifications/summary')
             ->assertOk()
-            ->assertJsonPath('data.laporan_baru', 1);
+            ->assertJsonPath('data.laporan_baru', 2);
     }
 
     private function createUser(string $role): User

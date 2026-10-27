@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Client\Response;
+use App\Services\AiClient;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Response;
 
 class ChatController extends Controller
 {
@@ -31,7 +31,7 @@ FORMAT: balas HANYA JSON dengan bentuk:
 {"reply": string, "quick_replies": [string, ...maks 4, boleh kosong], "draft": string|null, "risk_level": "low"|"medium"|"high"}
 PROMPT;
 
-    public function send(Request $request)
+    public function send(Request $request, AiClient $ai): Response
     {
         $request->validate([
             'message' => 'required|string|max:1000',
@@ -53,57 +53,8 @@ PROMPT;
             'parts' => [['text' => $request->input('message')]],
         ];
 
-        $response = Http::withHeaders([
-            'x-goog-api-key' => config('services.gemini.key'),
-        ])->timeout(30)->post(
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
-            [
-                'systemInstruction' => ['parts' => [['text' => self::SYSTEM_PROMPT]]],
-                'contents' => $contents,
-                'generationConfig' => ['responseMimeType' => 'application/json'],
-            ]
-        );
-
-        if ($this->isGeminiRateLimited($response)) {
-            $messages = [[
-                'role' => 'system',
-                'content' => self::SYSTEM_PROMPT,
-            ]];
-
-            foreach ($contents as $content) {
-                $messages[] = [
-                    'role' => $content['role'] === 'model' ? 'assistant' : 'user',
-                    'content' => $content['parts'][0]['text'],
-                ];
-            }
-
-            $response = Http::withToken(config('services.groq.key'))
-                ->timeout(30)
-                ->post('https://api.groq.com/openai/v1/chat/completions', [
-                    'model' => 'llama-3.3-70b-versatile',
-                    'messages' => $messages,
-                    'response_format' => ['type' => 'json_object'],
-                ]);
-
-            $teks = $response->successful()
-                ? $response->json('choices.0.message.content')
-                : null;
-        } else {
-            $teks = $response->successful()
-                ? $response->json('candidates.0.content.parts.0.text')
-                : null;
-        }
-
-        if (! is_string($teks) || trim($teks) === '') {
-            return response([
-                'message' => 'Gagal ambil data',
-                'data' => null,
-            ], 500);
-        }
-
-        $hasil = json_decode($teks);
-
-        if (! is_object($hasil)) {
+        $hasil = $ai->chatJson(self::SYSTEM_PROMPT, $contents);
+        if ($hasil === null) {
             return response([
                 'message' => 'Gagal ambil data',
                 'data' => null,
@@ -112,13 +63,7 @@ PROMPT;
 
         return response([
             'message' => 'Berhasil ambil data',
-            'data' => $hasil,
+            'data' => (object) $hasil,
         ]);
-    }
-
-    private function isGeminiRateLimited(Response $response): bool
-    {
-        return $response->status() === 429
-            || ($response->status() === 403 && $response->json('error.status') === 'RESOURCE_EXHAUSTED');
     }
 }

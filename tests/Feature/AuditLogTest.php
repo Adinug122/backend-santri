@@ -90,28 +90,90 @@ class AuditLogTest extends TestCase
         ]);
     }
 
-    public function test_only_pengawas_can_read_audit_logs(): void
+    public function test_audit_logs_are_scoped_by_role(): void
     {
-        $report = $this->createReport($this->createUser('santri'));
-        Sanctum::actingAs($this->createUser('pengurus'));
+        $report = $this->createReport($this->createUser('santri'), true);
+        $pengurus = $this->createUser('pengurus');
+        Sanctum::actingAs($pengurus);
         $this->getJson("/api/reports/{$report->id}")->assertOk();
 
-        foreach (['pimpinan', 'pengurus', 'santri'] as $role) {
-            Sanctum::actingAs($this->createUser($role));
-            $this->getJson('/api/admin/audit-logs')->assertForbidden();
-        }
+        AuditLog::create([
+            'actor_id' => $this->createUser('pengawas')->id,
+            'action' => AuditLog::ACCOUNT_ACTIVATED,
+            'subject_type' => User::class,
+            'subject_id' => $pengurus->id,
+            'metadata' => ['menyangkut_pimpinan' => true],
+            'ip_address' => '192.0.2.10',
+        ]);
 
-        Sanctum::actingAs($this->createUser('pengawas'));
+        Sanctum::actingAs($this->createUser('santri'));
+        $this->getJson('/api/admin/audit-logs')->assertForbidden();
 
+        Sanctum::actingAs($pengurus);
         $this->getJson('/api/admin/audit-logs')
             ->assertOk()
-            ->assertJsonPath('data.0.action', AuditLog::REPORT_VIEWED)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonMissingPath('data.0.metadata.menyangkut_pimpinan')
+            ->assertJsonMissingPath('data.0.ip_address');
+
+        Sanctum::actingAs($this->createUser('pengurus'));
+        $this->getJson('/api/admin/audit-logs')->assertOk()->assertJsonCount(0, 'data');
+
+        $pimpinan = $this->createUser('pimpinan');
+        AuditLog::create([
+            'actor_id' => $pimpinan->id,
+            'action' => AuditLog::ACCOUNT_DEACTIVATED,
+            'subject_type' => User::class,
+            'subject_id' => $pengurus->id,
+            'metadata' => ['role' => 'pengurus'],
+            'ip_address' => '192.0.2.20',
+        ]);
+        Sanctum::actingAs($pimpinan);
+        $this->getJson('/api/admin/audit-logs')
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonMissingPath('data.0.ip_address')
+            ->assertJsonMissingPath('data.1.ip_address')
+            ->assertJsonMissingPath('data.2.ip_address')
+            ->assertJsonMissingPath('data.1.metadata.menyangkut_pimpinan')
             ->assertJsonStructure([
                 'data' => [
                     '*' => ['id', 'action', 'subject_type', 'subject_id', 'metadata', 'created_at', 'actor' => ['id', 'name', 'role']],
                 ],
                 'meta' => ['current_page', 'per_page', 'total', 'last_page'],
             ]);
+
+        Sanctum::actingAs($this->createUser('pengawas'));
+        $this->getJson('/api/admin/audit-logs?action='.AuditLog::ACCOUNT_ACTIVATED)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.metadata.menyangkut_pimpinan', true)
+            ->assertJsonPath('data.0.ip_address', '192.0.2.10');
+    }
+
+    public function test_santri_reads_a_trimmed_trail_of_their_own_report(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        Sanctum::actingAs($this->createUser('pengurus'));
+        $this->getJson("/api/reports/{$report->id}")->assertOk();
+        $this->patchJson("/api/reports/{$report->id}/status", ['status' => 'diproses'])->assertOk();
+        $this->postJson("/api/reports/{$report->id}/notes", ['catatan' => 'Rahasia.'])->assertCreated();
+
+        Sanctum::actingAs($santri);
+        $response = $this->getJson("/api/reports/{$report->id}/trail")
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.aksi', 'dibuka')
+            ->assertJsonPath('data.0.peran', 'pengurus')
+            ->assertJsonPath('data.1.aksi', 'status_diubah')
+            ->assertJsonPath('data.1.status', 'diproses')
+            ->assertJsonMissingPath('data.0.actor')
+            ->assertJsonMissingPath('data.0.ip_address');
+        $this->assertStringNotContainsString('Rahasia', $response->getContent());
+
+        Sanctum::actingAs($this->createUser('santri'));
+        $this->getJson("/api/reports/{$report->id}/trail")->assertForbidden();
     }
 
     public function test_audit_logs_can_be_filtered_by_action_and_actor(): void
@@ -165,7 +227,7 @@ class AuditLogTest extends TestCase
         ]);
     }
 
-    private function createReport(User $owner): Laporan
+    private function createReport(User $owner, bool $flagged = false): Laporan
     {
         return Laporan::create([
             'users_id' => $owner->id,
@@ -173,7 +235,7 @@ class AuditLogTest extends TestCase
             'kategori' => 'Fasilitas',
             'isi' => 'Isi laporan uji.',
             'tampilkan_identitas' => false,
-            'menyangkut_pimpinan' => false,
+            'menyangkut_pimpinan' => $flagged,
             'status' => 'baru',
             'waktu' => now(),
         ]);

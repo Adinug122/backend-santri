@@ -12,7 +12,8 @@ class AuditLogController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        if (Auth::user()?->role !== 'pengawas') {
+        $role = Auth::user()?->role;
+        if (! in_array($role, ['pengawas', 'pimpinan', 'pengurus'], true)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -27,6 +28,16 @@ class AuditLogController extends Controller
         ]);
 
         $query = AuditLog::query()->with('actor:id,name,email,role');
+        if ($role === 'pengurus') {
+            $query->where('actor_id', Auth::id());
+        } elseif ($role === 'pimpinan') {
+            $query->where(function ($scope): void {
+                $scope->where('actor_id', Auth::id())
+                    ->orWhere('action', 'like', 'account.%')
+                    ->orWhere('action', 'like', 'deactivation.%')
+                    ->orWhereHas('actor', fn ($actor) => $actor->where('role', 'pengurus'));
+            });
+        }
 
         foreach (['action', 'actor_id', 'subject_type', 'subject_id'] as $filter) {
             if (isset($validated[$filter])) {
@@ -45,7 +56,7 @@ class AuditLogController extends Controller
         $logs = $query->latest('id')->paginate((int) ($validated['per_page'] ?? 20));
 
         return response()->json([
-            'data' => $logs->items(),
+            'data' => $this->presentLogs($logs->items(), $role),
             'meta' => [
                 'current_page' => $logs->currentPage(),
                 'per_page' => $logs->perPage(),
@@ -56,5 +67,27 @@ class AuditLogController extends Controller
             ],
             'message' => 'Log audit berhasil diambil',
         ]);
+    }
+
+    /**
+     * Selain pengawas, penanda laporan sensitif dan alamat IP tidak dikirim.
+     *
+     * @param  array<int, AuditLog>  $logs
+     * @return array<int, AuditLog>
+     */
+    private function presentLogs(array $logs, string $role): array
+    {
+        if ($role === 'pengawas') {
+            return $logs;
+        }
+
+        return array_map(function (AuditLog $log): AuditLog {
+            $metadata = $log->metadata ?? [];
+            unset($metadata['menyangkut_pimpinan']);
+            $log->metadata = $metadata === [] ? null : $metadata;
+            $log->makeHidden('ip_address');
+
+            return $log;
+        }, $logs);
     }
 }

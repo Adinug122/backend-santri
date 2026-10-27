@@ -10,6 +10,16 @@ use Tests\TestCase;
 
 class ChatControllerTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'services.gemini.key' => 'test-gemini-key',
+            'services.groq.key' => 'test-groq-key',
+        ]);
+    }
+
     public function test_returns_401_when_request_is_unauthenticated(): void
     {
         Http::preventStrayRequests();

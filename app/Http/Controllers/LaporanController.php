@@ -47,11 +47,11 @@ class LaporanController extends Controller
         }
 
         if ($user->role === 'pimpinan') {
-            return ! $laporan->isMenyangkutPimpinan();
+            return true;
         }
 
         if ($user->role === 'pengurus') {
-            return ! $laporan->isMenyangkutPimpinan() && ! $laporan->isRestrictedForPengurus();
+            return ! $laporan->isRestrictedForPengurus();
         }
 
         if ($user->role === 'pengawas') {
@@ -88,6 +88,9 @@ class LaporanController extends Controller
 
         $payload = $laporan->toArray();
         unset($payload['latest_identity_request']);
+        if (! in_array(Auth::user()?->role, ['pengawas', 'santri'], true)) {
+            unset($payload['menyangkut_pimpinan']);
+        }
         $payload['user'] = $this->maskedUserPayload($laporan);
         $payload['permintaan_identitas'] = Auth::user()?->role === 'pengurus'
             ? null
@@ -254,6 +257,43 @@ class LaporanController extends Controller
         ]);
     }
 
+    public function trail(Laporan $laporan): JsonResponse
+    {
+        if (Auth::user()?->role !== 'santri' || (int) $laporan->users_id !== (int) Auth::id()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $labels = [
+            AuditLog::REPORT_VIEWED => 'dibuka',
+            AuditLog::REPORT_STATUS_CHANGED => 'status_diubah',
+            AuditLog::REPORT_MESSAGE_SENT => 'dibalas',
+            AuditLog::REPORT_ESCALATED => 'diteruskan',
+            AuditLog::IDENTITY_REQUESTED => 'minta_nama',
+            AuditLog::IDENTITY_RESPONDED => 'minta_nama_dijawab',
+        ];
+
+        $items = AuditLog::query()
+            ->with('actor:id,role')
+            ->where('subject_type', $laporan->getMorphClass())
+            ->where('subject_id', $laporan->id)
+            ->whereIn('action', array_keys($labels))
+            ->oldest('id')
+            ->get()
+            ->map(fn (AuditLog $log) => [
+                'aksi' => $labels[$log->action],
+                'peran' => $log->actor?->role,
+                'tanggal' => $log->created_at?->toDateString(),
+                'status' => $log->metadata['to'] ?? null,
+            ])
+            ->unique(fn (array $item) => implode('|', $item))
+            ->values();
+
+        return response()->json([
+            'data' => $items,
+            'message' => 'Jejak laporan berhasil diambil',
+        ]);
+    }
+
     public function toggleIdentity(Request $request, Laporan $laporan): JsonResponse
     {
         if (Auth::user()?->role !== 'santri' || (int) $laporan->users_id !== (int) Auth::id()) {
@@ -339,7 +379,7 @@ class LaporanController extends Controller
 
         return response()->json([
             'message' => 'Status laporan berhasil diubah',
-            'laporan' => $laporan->fresh(),
+            'laporan' => $this->reportPayload($laporan->fresh(), true),
         ]);
     }
 
@@ -369,7 +409,7 @@ class LaporanController extends Controller
 
         return response()->json([
             'message' => 'Eskalasi berhasil dicatat',
-            'laporan' => $laporan->fresh(),
+            'laporan' => $this->reportPayload($laporan->fresh(), true),
         ]);
     }
 

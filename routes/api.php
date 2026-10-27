@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DashboardAiController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeactivationRequestController;
 use App\Http\Controllers\LaporanController;
@@ -53,6 +54,9 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/reports/{laporan}/messages', [LaporanController::class, 'messages'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/messages', [LaporanController::class, 'sendMessage'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/notes', [LaporanController::class, 'addNote'])->whereNumber('laporan');
+    Route::get('/reports/{laporan}/trail', [LaporanController::class, 'trail'])->whereNumber('laporan');
+    Route::post('/dashboard/ai-summary', [DashboardAiController::class, 'summary'])
+        ->middleware('throttle:6,1');
 
     Route::get('/notifications', [NotificationController::class, 'index'])
         ->middleware('throttle:120,1');
