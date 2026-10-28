@@ -44,6 +44,7 @@ class DashboardAiSummaryTest extends TestCase
         $owner->save();
         $this->createReport($owner, 'LAPORAN-BIASA');
         $this->createReport($owner, 'RAHASIA-PENGURUS', 'masalah_pengurus');
+        $this->createReport($owner, 'RAHASIA-PIMPINAN', 'Insiden', true);
         Sanctum::actingAs($this->createUser('pengurus'));
 
         $this->postJson('/api/dashboard/ai-summary')
@@ -55,20 +56,31 @@ class DashboardAiSummaryTest extends TestCase
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->body(), 'LAPORAN-BIASA')
             && ! str_contains($request->body(), 'RAHASIA-PENGURUS')
+            && ! str_contains($request->body(), 'RAHASIA-PIMPINAN')
             && ! str_contains($request->body(), 'Nama Pelapor Rahasia')
             && ! str_contains($request->body(), 'menyangkut_pimpinan'));
     }
 
-    public function test_summary_hides_the_flag_and_uses_a_role_scoped_cache(): void
+    public function test_pimpinan_summary_excludes_flagged_reports_and_invalidates_the_old_cache_key(): void
     {
         $this->fakeAiResponse();
-        Cache::forget('dashboard-ai:pimpinan:7');
-        $this->createReport($this->createUser('santri'), 'LAPORAN-BERTANDA', 'Insiden', true);
+        Cache::put('dashboard-ai:pimpinan:7', [
+            'jumlah_laporan' => 1,
+            'periode_hari' => 7,
+            'dibuat_pada' => now()->toIso8601String(),
+            'ringkasan' => 'Ringkasan dari laporan sensitif.',
+            'poin' => [],
+        ], now()->addHour());
+        Cache::forget('dashboard-ai:v2:pimpinan:7');
+        $owner = $this->createUser('santri');
+        $this->createReport($owner, 'LAPORAN-BERTANDA', 'Insiden', true);
+        $this->createReport($owner, 'LAPORAN-UMUM');
         Sanctum::actingAs($this->createUser('pimpinan'));
 
         $this->postJson('/api/dashboard/ai-summary')
             ->assertOk()
             ->assertJsonPath('data.jumlah_laporan', 1)
+            ->assertJsonPath('data.ringkasan', 'Ringkasan contoh.')
             ->assertJsonPath('data.dari_cache', false)
             ->assertJsonMissingPath('data.menyangkut_pimpinan');
         $this->postJson('/api/dashboard/ai-summary')
@@ -76,7 +88,8 @@ class DashboardAiSummaryTest extends TestCase
             ->assertJsonPath('data.dari_cache', true);
 
         Http::assertSentCount(1);
-        Http::assertSent(fn (Request $request): bool => str_contains($request->body(), 'LAPORAN-BERTANDA')
+        Http::assertSent(fn (Request $request): bool => str_contains($request->body(), 'LAPORAN-UMUM')
+            && ! str_contains($request->body(), 'LAPORAN-BERTANDA')
             && ! str_contains($request->body(), 'menyangkut_pimpinan'));
     }
 

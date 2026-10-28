@@ -110,7 +110,7 @@ class AuditLogTest extends TestCase
 
     public function test_audit_logs_are_scoped_by_role(): void
     {
-        $report = $this->createReport($this->createUser('santri'), true);
+        $report = $this->createReport($this->createUser('santri'));
         $pengurus = $this->createUser('pengurus');
         Sanctum::actingAs($pengurus);
         $this->getJson("/api/reports/{$report->id}")->assertOk();

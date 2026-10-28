@@ -219,6 +219,7 @@ Angka laporan mengikuti visibilitas peran. `pimpinan` menghitung laporan non-fla
   "data": {
     "total_santri": 120,
     "total_laporan": 8,
+    "jumlah_terlambat": 2,
     "laporan_per_status": { "baru": 3, "diproses": 4, "selesai": 1 },
     "laporan_per_kategori": [
       { "kategori": "Perilaku pimpinan", "total": 8 }
@@ -227,6 +228,14 @@ Angka laporan mengikuti visibilitas peran. `pimpinan` menghitung laporan non-fla
   "message": "Ringkasan dashboard berhasil diambil"
 }
 ```
+
+`jumlah_terlambat` menghitung laporan dengan status `baru` yang dibuat setidaknya
+24 jam lalu. Nilainya dihitung saat endpoint dipanggil dan mengikuti visibilitas
+peran; status selain `baru` tidak dihitung.
+
+Field `terlambat` juga disertakan pada daftar dan detail laporan yang dapat
+diakses. Laporan yang menyangkut pimpinan hanya mengirim field tersebut kepada
+santri pemilik dan pengawas.
 
 ## 7. Menonaktifkan akun
 

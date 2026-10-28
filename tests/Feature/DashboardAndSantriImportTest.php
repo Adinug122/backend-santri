@@ -36,6 +36,7 @@ class DashboardAndSantriImportTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.total_santri', 1)
             ->assertJsonPath('data.total_laporan', 2)
+            ->assertJsonPath('data.jumlah_terlambat', 0)
             ->assertJsonPath('data.laporan_per_status.baru', 1)
             ->assertJsonPath('data.laporan_per_status.diproses', 1)
             ->assertJsonPath('data.laporan_per_status.selesai', 0)

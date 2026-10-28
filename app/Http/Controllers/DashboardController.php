@@ -43,6 +43,10 @@ class DashboardController extends Controller
             'data' => [
                 'total_santri' => Santri::count(),
                 'total_laporan' => Laporan::query()->visibleToRole($role)->count(),
+                'jumlah_terlambat' => Laporan::query()
+                    ->visibleToRole($role)
+                    ->terlambat()
+                    ->count(),
                 'laporan_per_status' => [
                     'baru' => (int) ($statusCounts['baru'] ?? 0),
                     'diproses' => (int) ($statusCounts['diproses'] ?? 0),

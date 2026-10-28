@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AuditLog;
 use App\Models\Laporan;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -13,6 +14,13 @@ use Tests\TestCase;
 class PengawasReportAccessTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     public function test_santri_can_create_a_flagged_report_and_regular_reports_default_to_false(): void
     {
@@ -44,7 +52,7 @@ class PengawasReportAccessTest extends TestCase
         ]);
     }
 
-    public function test_pimpinan_can_see_and_act_on_flagged_reports_without_the_flag(): void
+    public function test_pimpinan_cannot_see_or_act_on_flagged_reports(): void
     {
         $owner = $this->createUser('santri');
         $flagged = $this->createReport($owner, true);
@@ -53,31 +61,25 @@ class PengawasReportAccessTest extends TestCase
 
         $this->getJson('/api/reports')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonMissingPath('data.0.menyangkut_pimpinan');
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $regular->id);
 
         $this->getJson("/api/reports/{$flagged->id}")
-            ->assertOk()
-            ->assertJsonMissingPath('data.menyangkut_pimpinan');
-        $this->getJson("/api/reports/{$flagged->id}/messages")->assertOk();
-        $this->postJson("/api/reports/{$flagged->id}/messages", ['isi' => 'Pesan.'])->assertCreated();
-        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])
-            ->assertOk()
-            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
-        $this->postJson("/api/reports/{$flagged->id}/notes", ['catatan' => 'Catatan.'])->assertCreated();
-        $this->postJson("/api/reports/{$flagged->id}/escalate", ['tujuan' => 'Yayasan'])
-            ->assertOk()
-            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+            ->assertForbidden();
+        $this->getJson("/api/reports/{$flagged->id}/messages")->assertForbidden();
+        $this->postJson("/api/reports/{$flagged->id}/messages", ['isi' => 'Pesan.'])->assertForbidden();
+        $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])->assertForbidden();
+        $this->postJson("/api/reports/{$flagged->id}/notes", ['catatan' => 'Catatan.'])->assertForbidden();
+        $this->postJson("/api/reports/{$flagged->id}/escalate", ['tujuan' => 'Yayasan'])->assertForbidden();
         $this->postJson("/api/reports/{$flagged->id}/identity-request", ['alasan' => 'Ingin tahu.'])
-            ->assertCreated()
-            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+            ->assertForbidden();
 
-        $this->assertDatabaseHas('laporans', ['id' => $flagged->id, 'status' => 'diproses']);
+        $this->assertDatabaseHas('laporans', ['id' => $flagged->id, 'status' => 'baru']);
         $this->assertDatabaseHas('laporans', ['id' => $regular->id]);
-        $this->assertDatabaseCount('identity_requests', 1);
+        $this->assertDatabaseCount('identity_requests', 0);
     }
 
-    public function test_pengurus_can_see_flagged_reports_without_the_flag_but_not_restricted_reports(): void
+    public function test_pengurus_cannot_see_flagged_reports_or_restricted_reports(): void
     {
         $owner = $this->createUser('santri');
         $flagged = $this->createReport($owner, true);
@@ -88,15 +90,13 @@ class PengawasReportAccessTest extends TestCase
 
         $this->getJson('/api/reports')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonMissingPath('data.0.menyangkut_pimpinan');
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $regular->id);
 
         $this->getJson("/api/reports/{$flagged->id}")
-            ->assertOk()
-            ->assertJsonMissingPath('data.menyangkut_pimpinan');
+            ->assertForbidden();
         $this->patchJson("/api/reports/{$flagged->id}/status", ['status' => 'diproses'])
-            ->assertOk()
-            ->assertJsonMissingPath('laporan.menyangkut_pimpinan');
+            ->assertForbidden();
         $this->getJson("/api/reports/{$restricted->id}")->assertForbidden();
         $this->assertDatabaseHas('laporans', ['id' => $regular->id]);
     }
@@ -120,6 +120,70 @@ class PengawasReportAccessTest extends TestCase
             'action' => AuditLog::REPORT_VIEWED,
             'subject_id' => $flagged->id,
         ]);
+    }
+
+    public function test_santri_owner_and_pengawas_see_the_late_field_for_flagged_reports(): void
+    {
+        Carbon::setTestNow('2026-10-28 12:00:00');
+        $owner = $this->createUser('santri');
+        $flagged = $this->createReport($owner, true);
+        $this->ageReport($flagged, 25);
+
+        Sanctum::actingAs($owner);
+        $this->getJson("/api/reports/{$flagged->id}")
+            ->assertOk()
+            ->assertJsonPath('data.terlambat', true);
+        $this->getJson('/api/reports/mine')
+            ->assertOk()
+            ->assertJsonPath('data.0.terlambat', true);
+
+        Sanctum::actingAs($this->createUser('pengawas'));
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.terlambat', true);
+        $this->getJson("/api/reports/{$flagged->id}")
+            ->assertOk()
+            ->assertJsonPath('data.terlambat', true);
+    }
+
+    public function test_late_scope_and_accessor_follow_status_and_24_hour_limit(): void
+    {
+        Carbon::setTestNow('2026-10-28 12:00:00');
+        $owner = $this->createUser('santri');
+        $report23HoursOld = $this->createReport($owner);
+        $report25HoursOld = $this->createReport($owner);
+        $processedReport25HoursOld = $this->createReport($owner);
+        $this->ageReport($report23HoursOld, 23);
+        $this->ageReport($report25HoursOld, 25);
+        $this->ageReport($processedReport25HoursOld, 25);
+        $processedReport25HoursOld->update(['status' => 'diproses']);
+
+        $this->assertFalse($report23HoursOld->fresh()->terlambat);
+        $this->assertTrue($report25HoursOld->fresh()->terlambat);
+        $this->assertFalse($processedReport25HoursOld->fresh()->terlambat);
+        $this->assertSame(
+            [$report25HoursOld->id],
+            Laporan::query()->terlambat()->pluck('id')->all(),
+        );
+    }
+
+    public function test_report_list_orders_late_reports_first_then_newest(): void
+    {
+        Carbon::setTestNow('2026-10-28 12:00:00');
+        $owner = $this->createUser('santri');
+        $newestLateReport = $this->createReport($owner);
+        $olderLateReport = $this->createReport($owner);
+        $recentReport = $this->createReport($owner);
+        $this->ageReport($newestLateReport, 25);
+        $this->ageReport($olderLateReport, 26);
+        $this->ageReport($recentReport, 1);
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->getJson('/api/reports')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newestLateReport->id)
+            ->assertJsonPath('data.1.id', $olderLateReport->id)
+            ->assertJsonPath('data.2.id', $recentReport->id);
     }
 
     public function test_pengawas_can_handle_flagged_reports_but_not_regular_reports(): void
@@ -175,20 +239,25 @@ class PengawasReportAccessTest extends TestCase
 
     public function test_dashboard_summary_is_scoped_to_the_role(): void
     {
+        Carbon::setTestNow('2026-10-28 12:00:00');
         $owner = $this->createUser('santri');
+        $regularLate = $this->createReport($owner);
         $this->createReport($owner);
-        $this->createReport($owner);
-        $this->createReport($owner, true);
+        $sensitiveLate = $this->createReport($owner, true);
+        $this->ageReport($regularLate, 25);
+        $this->ageReport($sensitiveLate, 25);
 
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/dashboard/summary')
             ->assertOk()
-            ->assertJsonPath('data.total_laporan', 3);
+            ->assertJsonPath('data.total_laporan', 2)
+            ->assertJsonPath('data.jumlah_terlambat', 1);
 
         Sanctum::actingAs($this->createUser('pengawas'));
         $this->getJson('/api/dashboard/summary')
             ->assertOk()
-            ->assertJsonPath('data.total_laporan', 1);
+            ->assertJsonPath('data.total_laporan', 1)
+            ->assertJsonPath('data.jumlah_terlambat', 1);
 
         Sanctum::actingAs($this->createUser('pengurus'));
         $this->getJson('/api/dashboard/summary')->assertForbidden();
@@ -203,7 +272,7 @@ class PengawasReportAccessTest extends TestCase
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/notifications/summary')
             ->assertOk()
-            ->assertJsonPath('data.laporan_baru', 2);
+            ->assertJsonPath('data.laporan_baru', 1);
 
         Sanctum::actingAs($this->createUser('pengawas'));
         $this->getJson('/api/notifications/summary')
@@ -219,7 +288,7 @@ class PengawasReportAccessTest extends TestCase
         Sanctum::actingAs($this->createUser('pimpinan'));
         $this->getJson('/api/notifications/summary')
             ->assertOk()
-            ->assertJsonPath('data.laporan_baru', 2);
+            ->assertJsonPath('data.laporan_baru', 1);
     }
 
     private function createUser(string $role): User
@@ -245,5 +314,12 @@ class PengawasReportAccessTest extends TestCase
             'status' => 'baru',
             'waktu' => now(),
         ]);
+    }
+
+    private function ageReport(Laporan $laporan, int $hours): void
+    {
+        Laporan::query()
+            ->whereKey($laporan->id)
+            ->update(['created_at' => now()->subHours($hours)]);
     }
 }

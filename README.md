@@ -64,9 +64,9 @@ Every `{laporan}` path segment in the report API is the numeric `id` primary key
 
 Only santri can create reports, list their own reports, or toggle identity on a report they own. Staff can view reports and their internal notes; santri responses omit internal notes. When a report hides identity, the owner's name is masked in staff report lists, details, and messages, and `users_id` is omitted from staff payloads.
 
-`pengurus` cannot read or act on reports with category `masalah_pengurus`. The report list, notification summary, and notification list exclude those reports for `pengurus`; detail, messages, status, notes, and escalation endpoints return `403`. `pimpinan` retains full access. `permintaan_identitas` is always `null` for `pengurus`, so the reason, evidence URL, and requester are not sent to them.
+`pengurus` cannot read or act on reports with category `masalah_pengurus` or reports flagged `menyangkut_pimpinan`. The report list, notification summary, and notification list exclude those reports for `pengurus`; detail, messages, status, notes, and escalation endpoints return `403`. `pimpinan` cannot read or act on reports flagged `menyangkut_pimpinan`. `permintaan_identitas` is always `null` for `pengurus`, so the reason, evidence URL, and requester are not sent to them.
 
-After a santri approves an identity request, `pimpinan` receives the reporter's real name in `user.name` (and in notification senders). Message payloads expose `pengirim.id`, `pengirim.name`, and `pengirim.role` so the client can distinguish the sender without seeing hidden names.
+After a santri approves an identity request, `pimpinan` receives the reporter's real name in `user.name` (and in notification senders) for reports visible to that role. Message payloads expose `pengirim.id`, `pengirim.name`, and `pengirim.role` so the client can distinguish the sender without seeing hidden names.
 
 Logout is available at `POST /api/auth/logout`.
 
@@ -136,7 +136,7 @@ Example login response (token redacted):
 
 The dashboard and santri import endpoints require a Bearer token from a `pimpinan` account, except `GET /api/dashboard/summary`, which is also available to `pengawas` with counts limited to flagged reports:
 
-- `GET /api/dashboard/summary` returns santri and report totals grouped by status and category. `pimpinan` counts exclude reports flagged `menyangkut_pimpinan`; `pengawas` counts include only those reports.
+- `GET /api/dashboard/summary` returns santri and report totals grouped by status and category, plus `jumlah_terlambat` for reports still `baru` at least 24 hours after creation. `pimpinan` counts exclude reports flagged `menyangkut_pimpinan`; `pengawas` counts include only those reports.
 - `GET /api/admin/accounts` lists account details without exposing passwords.
 - `PATCH /api/admin/accounts/{userId}/status` toggles an account's active status. Deactivating an account revokes its tokens; the current and last active pimpinan accounts cannot be deactivated, `pengawas` accounts cannot be deactivated from the app, and accounts with open reports require the approval flow described in the previous section.
 - `GET /api/admin/santri/export` downloads current santri data as Excel without `id_santri` or `password`, so IDs and credentials are never shown to users.

@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Laporan extends Model
 {
+    public const LATE_AFTER_HOURS = 24;
+
     /**
      * Kolom penanda "sudah dibaca" untuk setiap peran pengguna.
      *
@@ -79,14 +81,29 @@ class Laporan extends Model
     {
         return match ($role) {
             'pengurus' => $query
+                ->where('menyangkut_pimpinan', false)
                 ->whereRaw(
                     "LOWER(REPLACE(REPLACE(TRIM(kategori), ' ', '_'), '-', '_')) <> ?",
                     [self::PENGURUS_RESTRICTED_CATEGORY],
                 ),
-            'pimpinan' => $query,
+            'pimpinan' => $query->where('menyangkut_pimpinan', false),
             'pengawas' => $query->where('menyangkut_pimpinan', true),
             default => $query,
         };
+    }
+
+    public function scopeTerlambat(Builder $query): Builder
+    {
+        return $query
+            ->where('status', 'baru')
+            ->where('created_at', '<=', now()->subHours(self::LATE_AFTER_HOURS));
+    }
+
+    public function getTerlambatAttribute(): bool
+    {
+        return $this->status === 'baru'
+            && $this->created_at !== null
+            && $this->created_at->lte(now()->subHours(self::LATE_AFTER_HOURS));
     }
 
     public function user()

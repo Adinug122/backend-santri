@@ -48,11 +48,12 @@ class LaporanController extends Controller
         }
 
         if ($user->role === 'pimpinan') {
-            return true;
+            return ! $laporan->isMenyangkutPimpinan();
         }
 
         if ($user->role === 'pengurus') {
-            return ! $laporan->isRestrictedForPengurus();
+            return ! $laporan->isMenyangkutPimpinan()
+                && ! $laporan->isRestrictedForPengurus();
         }
 
         if ($user->role === 'pengawas') {
@@ -89,6 +90,14 @@ class LaporanController extends Controller
 
         $payload = $laporan->toArray();
         unset($payload['latest_identity_request']);
+        if (
+            ! $laporan->isMenyangkutPimpinan()
+            || Auth::user()?->role === 'pengawas'
+            || (Auth::user()?->role === 'santri' && $ownerId === (int) Auth::id())
+        ) {
+            $payload['terlambat'] = $laporan->terlambat;
+        }
+
         if (! in_array(Auth::user()?->role, ['pengawas', 'santri'], true)) {
             unset($payload['menyangkut_pimpinan']);
         }
@@ -171,6 +180,10 @@ class LaporanController extends Controller
         $laporans = Laporan::query()
             ->visibleToRole(Auth::user()?->role)
             ->with(['user', 'catatans.user', 'latestIdentityRequest', 'percakapans.pengirim'])
+            ->orderByRaw(
+                'CASE WHEN status = ? AND created_at <= ? THEN 0 ELSE 1 END',
+                ['baru', now()->subHours(Laporan::LATE_AFTER_HOURS)],
+            )
             ->latest()
             ->get()
             ->map(fn (Laporan $laporan) => $this->reportPayload($laporan, true));

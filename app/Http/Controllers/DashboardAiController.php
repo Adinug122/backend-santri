@@ -42,7 +42,7 @@ PROMPT;
             'refresh' => ['nullable', 'boolean'],
         ]);
         $days = (int) ($data['periode'] ?? 7);
-        $key = "dashboard-ai:{$role}:{$days}";
+        $key = "dashboard-ai:v2:{$role}:{$days}";
 
         if ($request->boolean('refresh')) {
             Cache::forget($key);
