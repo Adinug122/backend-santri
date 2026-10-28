@@ -8,6 +8,13 @@ use Illuminate\Http\Response;
 
 class ChatController extends Controller
 {
+    private const REPORT_SUMMARY_PROMPT = <<<'PROMPT'
+Ringkas draf laporan santri dalam bahasa Indonesia yang jelas dan padat.
+Pertahankan fakta penting yang disebutkan, termasuk kejadian, waktu, tempat, dan pihak yang terlibat jika ada.
+Jangan menambahkan fakta, membuat asumsi, mengubah makna, atau memberi penilaian.
+Gunakan sudut pandang orang pertama dan keluarkan HANYA JSON dengan bentuk {"summary": string}.
+PROMPT;
+
     private const SYSTEM_PROMPT = <<<'PROMPT'
 Kamu adalah "Sahabat", teman cerita untuk santri di pesantren. Kamu BUKAN konselor, psikolog, atau ustaz.
 Bahasa: Indonesia santai, hangat, singkat (maksimal 3 kalimat per balasan).
@@ -64,6 +71,36 @@ PROMPT;
         return response([
             'message' => 'Berhasil ambil data',
             'data' => (object) $hasil,
+        ]);
+    }
+
+    public function ringkasLaporan(Request $request, AiClient $ai): Response
+    {
+        if ($request->user()?->role !== 'santri') {
+            return response([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'isi' => ['required', 'string', 'max:10000'],
+        ]);
+
+        $hasil = $ai->askJson(self::REPORT_SUMMARY_PROMPT, $validated['isi']);
+        $ringkasan = $hasil['summary'] ?? null;
+
+        if (! is_string($ringkasan) || trim($ringkasan) === '') {
+            return response([
+                'message' => 'Gagal merangkum laporan',
+                'data' => null,
+            ], 500);
+        }
+
+        return response([
+            'message' => 'Berhasil merangkum laporan',
+            'data' => [
+                'draft' => trim($ringkasan),
+            ],
         ]);
     }
 }

@@ -30,6 +30,24 @@ class AuditLogTest extends TestCase
         ]);
     }
 
+    public function test_deleting_a_new_report_writes_an_audit_entry_for_its_santri_owner(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        Sanctum::actingAs($santri);
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $santri->id,
+            'action' => AuditLog::REPORT_DELETED,
+            'subject_type' => $report->getMorphClass(),
+            'subject_id' => $report->id,
+            'metadata->no_laporan' => $report->no_laporan,
+        ]);
+    }
+
     public function test_sensitive_report_actions_are_audited(): void
     {
         $pengurus = $this->createUser('pengurus');

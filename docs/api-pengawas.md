@@ -102,6 +102,31 @@ Respons `201`:
 
 `no_laporan` adalah kode pelacakan yang harus ditampilkan ke santri.
 
+Sebelum laporan dikirim, santri dapat meminta AI meringkas isi draft:
+
+`POST /reports/summarize` — hanya `santri`; endpoint ini tidak menyimpan laporan.
+
+Body:
+
+```json
+{
+  "isi": "Teks laporan yang akan diringkas."
+}
+```
+
+Respons `200` mengembalikan teks yang siap ditampilkan pada draft tambah laporan:
+
+```json
+{
+  "message": "Berhasil merangkum laporan",
+  "data": {
+    "draft": "Isi laporan yang sudah diringkas."
+  }
+}
+```
+
+Setelah draft dikonfirmasi santri, kirim ke `POST /reports` untuk menyimpan laporan.
+
 ## 4. Visibilitas laporan
 
 Berlaku untuk daftar, detail, pesan, status, catatan, eskalasi, dan permintaan identitas.
@@ -426,6 +451,7 @@ Aksi yang tercatat:
 | Aksi | Kapan |
 |---|---|
 | `report.viewed` | Staff/pengawas membuka detail laporan. |
+| `report.deleted` | Santri menghapus laporan miliknya yang masih berstatus `baru`. |
 | `report.status_changed` | Status laporan berubah. |
 | `report.message_sent` | Staff/pengawas mengirim pesan. |
 | `report.note_added` | Catatan internal ditambahkan. |
@@ -447,6 +473,7 @@ Tidak ada endpoint `PUT`, `PATCH`, atau `DELETE` untuk audit log.
 |---|---|---|---|
 | `GET` | `/reports` | staff + pengawas | Daftar mengikuti visibilitas peran. |
 | `GET` | `/reports/{id}` | staff + pengawas + pemilik | Menandai dibaca dan menulis audit untuk staff/pengawas. |
+| `DELETE` | `/reports/{id}` | pemilik (santri) | Hanya saat status `baru`; menghapus laporan beserta pesan, catatan, permintaan identitas, dan bukti terkait secara permanen. |
 | `PATCH` | `/reports/{id}/status` | staff + pengawas | Body `{ "status": "diproses" \| "selesai" }`. |
 | `POST` | `/reports/{id}/escalate` | staff + pengawas | Body `{ "tujuan": "...", "keterangan": "..." }`. |
 | `GET` | `/reports/{id}/messages` | staff + pengawas + pemilik | Menandai dibaca. |
@@ -455,5 +482,3 @@ Tidak ada endpoint `PUT`, `PATCH`, atau `DELETE` untuk audit log.
 | `POST` | `/reports/{id}/identity-request` | pimpinan + pengawas | Hanya untuk laporan yang boleh diakses; body `alasan` wajib, `bukti` opsional (jpg/jpeg/png/pdf, maks 10 MB). |
 | `PATCH` | `/reports/{id}/identity-request` | pemilik (santri) | Body `{ "status": "disetujui" \| "ditolak" \| 1 \| 0 }`. |
 | `PATCH` | `/reports/{id}/identity` | pemilik (santri) | Toggle atau set `tampilkan_identitas`. |
-
-

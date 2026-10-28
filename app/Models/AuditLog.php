@@ -12,6 +12,8 @@ class AuditLog extends Model
 
     public const REPORT_VIEWED = 'report.viewed';
 
+    public const REPORT_DELETED = 'report.deleted';
+
     public const REPORT_STATUS_CHANGED = 'report.status_changed';
 
     public const REPORT_MESSAGE_SENT = 'report.message_sent';

@@ -8,7 +8,9 @@ use App\Models\Laporan;
 use App\Models\Percakapan;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -17,6 +19,186 @@ use Tests\TestCase;
 class ReportApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_santri_can_permanently_delete_their_new_report(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $message = Percakapan::create([
+            'isi' => 'Pesan terkait laporan.',
+            'pengirim_id' => $santri->id,
+            'laporan_id' => $report->id,
+        ]);
+        $note = Catatan::create([
+            'catatan' => 'Catatan terkait laporan.',
+            'users_id' => $this->createUser('pengurus')->id,
+            'laporan_id' => $report->id,
+        ]);
+        Storage::fake('local');
+        Storage::disk('local')->put('identity-evidence/bukti.pdf', 'Bukti.');
+        $identityRequest = IdentityRequest::create([
+            'laporan_id' => $report->id,
+            'users_id' => $this->createUser('pimpinan')->id,
+            'alasan' => 'Bukti diperlukan untuk pemeriksaan.',
+            'bukti_path' => 'identity-evidence/bukti.pdf',
+        ]);
+        Sanctum::actingAs($santri);
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Laporan berhasil dihapus');
+
+        $this->assertDatabaseMissing('laporans', ['id' => $report->id]);
+        $this->assertDatabaseMissing('percakapans', ['id' => $message->id]);
+        $this->assertDatabaseMissing('catatans', ['id' => $note->id]);
+        $this->assertDatabaseMissing('identity_requests', ['id' => $identityRequest->id]);
+        Storage::disk('local')->assertMissing('identity-evidence/bukti.pdf');
+    }
+
+    public function test_santri_cannot_delete_a_report_owned_by_another_santri(): void
+    {
+        $report = $this->createReport($this->createUser('santri'));
+        Sanctum::actingAs($this->createUser('santri'));
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('laporans', ['id' => $report->id]);
+    }
+
+    public function test_staff_cannot_delete_a_santri_report(): void
+    {
+        $report = $this->createReport($this->createUser('santri'));
+        Sanctum::actingAs($this->createUser('pengurus'));
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('laporans', ['id' => $report->id]);
+    }
+
+    public function test_santri_cannot_delete_a_report_that_is_not_new(): void
+    {
+        $santri = $this->createUser('santri');
+        $report = $this->createReport($santri);
+        $report->update(['status' => 'diproses']);
+        Sanctum::actingAs($santri);
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertConflict()
+            ->assertJsonPath('message', 'Laporan hanya dapat dihapus saat status masih baru');
+
+        $this->assertDatabaseHas('laporans', [
+            'id' => $report->id,
+            'status' => 'diproses',
+        ]);
+    }
+
+    public function test_deleting_a_report_requires_authentication(): void
+    {
+        $report = $this->createReport($this->createUser('santri'));
+
+        $this->deleteJson("/api/reports/{$report->id}")
+            ->assertUnauthorized();
+
+        $this->assertDatabaseHas('laporans', ['id' => $report->id]);
+    }
+
+    public function test_santri_can_summarize_a_report_draft_without_saving_it(): void
+    {
+        $santri = $this->createUser('santri');
+        Sanctum::actingAs($santri);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent' => Http::response([
+                'candidates' => [
+                    ['content' => ['parts' => [['text' => '{"summary":"Saya melaporkan lampu kamar yang rusak sejak kemarin."}']]]],
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/reports/summarize', [
+            'isi' => 'Sejak kemarin lampu di kamar saya mati dan belum diperbaiki.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('message', 'Berhasil merangkum laporan')
+            ->assertJsonPath('data.draft', 'Saya melaporkan lampu kamar yang rusak sejak kemarin.');
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
+            && $request['contents'][0]['parts'][0]['text'] === 'Sejak kemarin lampu di kamar saya mati dan belum diperbaiki.');
+        $this->assertDatabaseCount('laporans', 0);
+    }
+
+    public function test_report_draft_summary_requires_a_santri_account(): void
+    {
+        Sanctum::actingAs($this->createUser('pengurus'));
+        Http::preventStrayRequests();
+
+        $this->postJson('/api/reports/summarize', [
+            'isi' => 'Lampu kamar rusak.',
+        ])->assertForbidden();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_report_draft_summary_requires_authentication(): void
+    {
+        Http::preventStrayRequests();
+
+        $this->postJson('/api/reports/summarize', [
+            'isi' => 'Lampu kamar rusak.',
+        ])->assertUnauthorized();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_report_draft_summary_requires_report_text(): void
+    {
+        Sanctum::actingAs($this->createUser('santri'));
+        Http::preventStrayRequests();
+
+        $this->postJson('/api/reports/summarize', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('isi');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_report_draft_summary_rejects_text_over_the_report_limit(): void
+    {
+        Sanctum::actingAs($this->createUser('santri'));
+        Http::preventStrayRequests();
+
+        $this->postJson('/api/reports/summarize', [
+            'isi' => str_repeat('a', 10001),
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('isi');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_report_draft_summary_returns_an_error_when_ai_does_not_return_a_summary(): void
+    {
+        Sanctum::actingAs($this->createUser('santri'));
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent' => Http::response([
+                'candidates' => [
+                    ['content' => ['parts' => [['text' => '{"unexpected":"response"}']]]],
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/reports/summarize', [
+            'isi' => 'Lampu kamar rusak.',
+        ])
+            ->assertInternalServerError()
+            ->assertJsonPath('message', 'Gagal merangkum laporan')
+            ->assertJsonPath('data', null);
+
+        $this->assertDatabaseCount('laporans', 0);
+    }
 
     public function test_staff_can_update_a_report_status(): void
     {

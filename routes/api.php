@@ -43,7 +43,10 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::post('/admin/santri/import', [SantriImportController::class, 'import']);
 
     Route::post('/reports', [LaporanController::class, 'store']);
+    Route::post('/reports/summarize', [ChatController::class, 'ringkasLaporan'])
+        ->middleware('throttle:6,1');
     Route::get('/reports/mine', [LaporanController::class, 'mine']);
+    Route::delete('/reports/{laporan}', [LaporanController::class, 'destroy'])->whereNumber('laporan');
     Route::patch('/reports/{laporan}/identity', [LaporanController::class, 'toggleIdentity'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/identity-request', [LaporanController::class, 'identityRequest'])->whereNumber('laporan');
     Route::patch('/reports/{laporan}/identity-request', [LaporanController::class, 'respondToIdentityRequest'])->whereNumber('laporan');

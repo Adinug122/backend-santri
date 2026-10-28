@@ -27,9 +27,15 @@ class UserController extends Controller
 
         $user = $userQuery->first();
 
-        if (! $user || ! $user->is_active || ! Hash::check($request->password, $user->password)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'message' => 'Login gagal, identifier atau password salah',
+            ], 401);
+        }
+
+        if (! $user->is_active) {
+            return response()->json([
+                'message' => 'Akun dinonaktifkan',
             ], 401);
         }
 

@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -216,6 +217,42 @@ class LaporanController extends Controller
                 'error' => $error->getMessage(),
             ], 500);
         }
+    }
+
+    public function destroy(Laporan $laporan): JsonResponse
+    {
+        if (Auth::user()?->role !== 'santri' || (int) $laporan->users_id !== (int) Auth::id()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if ($laporan->status !== 'baru') {
+            return response()->json([
+                'message' => 'Laporan hanya dapat dihapus saat status masih baru',
+            ], 409);
+        }
+
+        $buktiPaths = $laporan->identityRequests()
+            ->whereNotNull('bukti_path')
+            ->pluck('bukti_path')
+            ->all();
+
+        DB::transaction(function () use ($laporan): void {
+            AuditLog::record(AuditLog::REPORT_DELETED, $laporan, [
+                'no_laporan' => $laporan->no_laporan,
+            ]);
+
+            $laporan->delete();
+        });
+
+        if ($buktiPaths !== [] && ! Storage::disk('local')->delete($buktiPaths)) {
+            Log::warning('Failed to remove report identity evidence after deleting the report.', [
+                'laporan_id' => $laporan->id,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Laporan berhasil dihapus',
+        ]);
     }
 
     public function mine()

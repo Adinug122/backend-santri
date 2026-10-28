@@ -158,7 +158,27 @@ class AuthLoginTest extends TestCase
         $this->postJson('/api/auth/login', [
             'identifier' => 'nonaktif@example.test',
             'password' => 'password123',
-        ])->assertUnauthorized();
+        ])
+            ->assertUnauthorized()
+            ->assertJsonPath('message', 'Akun dinonaktifkan');
+    }
+
+    public function test_login_with_wrong_password_does_not_reveal_whether_the_account_is_deactivated(): void
+    {
+        User::create([
+            'name' => 'Pengurus Nonaktif',
+            'email' => 'nonaktif-password@example.test',
+            'role' => 'pengurus',
+            'password' => 'password123',
+            'is_active' => false,
+        ]);
+
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'nonaktif-password@example.test',
+            'password' => 'wrong-password',
+        ])
+            ->assertUnauthorized()
+            ->assertJsonPath('message', 'Login gagal, identifier atau password salah');
     }
 
     public function test_user_can_login_with_four_character_password(): void

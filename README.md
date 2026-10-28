@@ -91,6 +91,8 @@ Logout is available at `POST /api/auth/logout`.
 
 `POST /api/auth/login` and `GET /api/user` return the same user object shape. For `santri`, `santri` contains `nis` and `telepon_ortu`; for other roles it is `null`. `GET /api/user` remains accessible while `must_change_password` is `true`, so the client can render the profile before redirecting to the change-password page.
 
+When valid credentials belong to a deactivated account, login returns `401` with `{ "message": "Akun dinonaktifkan" }`. Invalid credentials continue to return a generic message.
+
 Example login response (token redacted):
 
 ```json
