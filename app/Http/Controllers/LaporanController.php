@@ -63,6 +63,13 @@ class LaporanController extends Controller
         return (int) $laporan->users_id === (int) $user->id;
     }
 
+    private function ensureReportIsUnlocked(Laporan $laporan): void
+    {
+        if ($laporan->is_locked) {
+            abort(409, 'Laporan telah dikunci dan tidak dapat diubah atau dihapus.');
+        }
+    }
+
     private function maskedUserPayload(Laporan $laporan): array
     {
         $user = $laporan->user;
@@ -238,23 +245,28 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if ($laporan->status !== 'baru') {
-            return response()->json([
-                'message' => 'Laporan hanya dapat dihapus saat status masih baru',
-            ], 409);
-        }
+        $this->ensureReportIsUnlocked($laporan);
 
-        $buktiPaths = $laporan->identityRequests()
-            ->whereNotNull('bukti_path')
-            ->pluck('bukti_path')
-            ->all();
+        $buktiPaths = [];
 
-        DB::transaction(function () use ($laporan): void {
-            AuditLog::record(AuditLog::REPORT_DELETED, $laporan, [
+        DB::transaction(function () use ($laporan, &$buktiPaths): void {
+            $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+            $this->ensureReportIsUnlocked($lockedLaporan);
+
+            if ($lockedLaporan->status !== 'baru') {
+                abort(409, 'Laporan hanya dapat dihapus saat status masih baru');
+            }
+
+            $buktiPaths = $lockedLaporan->identityRequests()
+                ->whereNotNull('bukti_path')
+                ->pluck('bukti_path')
+                ->all();
+
+            AuditLog::record(AuditLog::REPORT_DELETED, $lockedLaporan, [
                 'no_laporan' => $laporan->no_laporan,
             ]);
 
-            $laporan->delete();
+            $lockedLaporan->delete();
         });
 
         if ($buktiPaths !== [] && ! Storage::disk('local')->delete($buktiPaths)) {
@@ -356,6 +368,7 @@ class LaporanController extends Controller
 
         DB::transaction(function () use ($request, $laporan): void {
             $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+            $this->ensureReportIsUnlocked($lockedLaporan);
 
             $tampilkanIdentitas = $request->has('tampilkan_identitas')
                 ? $request->boolean('tampilkan_identitas')
@@ -409,56 +422,34 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $this->ensureReportIsUnlocked($laporan);
+
         $request->validate([
             'status' => ['required', 'in:diproses,selesai'],
         ]);
 
-        if ($laporan->status !== $request->status) {
-            $statusLama = $laporan->status;
+        DB::transaction(function () use ($laporan, $request): void {
+            $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+            $this->ensureReportIsUnlocked($lockedLaporan);
 
-            $laporan->update([
+            if ($lockedLaporan->status === $request->status) {
+                return;
+            }
+
+            $statusLama = $lockedLaporan->status;
+            $lockedLaporan->update([
                 'status_diubah' => now(),
                 'status' => $request->status,
             ]);
 
-            AuditLog::record(AuditLog::REPORT_STATUS_CHANGED, $laporan, [
+            AuditLog::record(AuditLog::REPORT_STATUS_CHANGED, $lockedLaporan, [
                 'from' => $statusLama,
                 'to' => $request->status,
             ]);
-        }
+        });
 
         return response()->json([
             'message' => 'Status laporan berhasil diubah',
-            'laporan' => $this->reportPayload($laporan->fresh(), true),
-        ]);
-    }
-
-    public function escalate(Request $request, Laporan $laporan)
-    {
-        if (! $this->hasStaffAccess() || ! $this->canAccessReport($laporan)) {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
-
-        $request->validate([
-            'tujuan' => ['required', 'string', 'max:255'],
-            'keterangan' => ['nullable', 'string'],
-        ]);
-
-        $note = Catatan::create([
-            'catatan' => trim(sprintf('Eskalasi ke %s%s', $request->tujuan, $request->keterangan ? ': '.$request->keterangan : '')),
-            'users_id' => Auth::id(),
-            'laporan_id' => $laporan->id,
-        ]);
-
-        $laporan->update(['status' => 'diproses', 'status_diubah' => now()]);
-
-        AuditLog::record(AuditLog::REPORT_ESCALATED, $laporan, [
-            'tujuan' => $request->tujuan,
-            'catatan_id' => $note->id,
-        ]);
-
-        return response()->json([
-            'message' => 'Eskalasi berhasil dicatat',
             'laporan' => $this->reportPayload($laporan->fresh(), true),
         ]);
     }
@@ -491,22 +482,31 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $this->ensureReportIsUnlocked($laporan);
+
         $request->validate([
             'isi' => ['required', 'string'],
         ]);
 
-        $message = Percakapan::create([
-            'isi' => $request->isi,
-            'pengirim_id' => Auth::id(),
-            'laporan_id' => $laporan->id,
-        ]);
+        $message = DB::transaction(function () use ($request, $laporan): Percakapan {
+            $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+            $this->ensureReportIsUnlocked($lockedLaporan);
 
-        if ($this->hasStaffAccess()) {
-            AuditLog::record(AuditLog::REPORT_MESSAGE_SENT, $laporan, [
-                'message_id' => $message->id,
-                'role' => Auth::user()?->role,
+            $message = Percakapan::create([
+                'isi' => $request->isi,
+                'pengirim_id' => Auth::id(),
+                'laporan_id' => $lockedLaporan->id,
             ]);
-        }
+
+            if ($this->hasStaffAccess()) {
+                AuditLog::record(AuditLog::REPORT_MESSAGE_SENT, $lockedLaporan, [
+                    'message_id' => $message->id,
+                    'role' => Auth::user()?->role,
+                ]);
+            }
+
+            return $message;
+        });
 
         return response()->json([
             'message' => 'Pesan berhasil dikirim',
@@ -524,19 +524,28 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $this->ensureReportIsUnlocked($laporan);
+
         $request->validate([
             'catatan' => ['required', 'string'],
         ]);
 
-        $note = Catatan::create([
-            'catatan' => $request->catatan,
-            'users_id' => Auth::id(),
-            'laporan_id' => $laporan->id,
-        ]);
+        $note = DB::transaction(function () use ($request, $laporan): Catatan {
+            $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+            $this->ensureReportIsUnlocked($lockedLaporan);
 
-        AuditLog::record(AuditLog::REPORT_NOTE_ADDED, $laporan, [
-            'catatan_id' => $note->id,
-        ]);
+            $note = Catatan::create([
+                'catatan' => $request->catatan,
+                'users_id' => Auth::id(),
+                'laporan_id' => $lockedLaporan->id,
+            ]);
+
+            AuditLog::record(AuditLog::REPORT_NOTE_ADDED, $lockedLaporan, [
+                'catatan_id' => $note->id,
+            ]);
+
+            return $note;
+        });
 
         return response()->json([
             'message' => 'Catatan internal berhasil ditambahkan',
@@ -562,6 +571,8 @@ class LaporanController extends Controller
         ) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
+
+        $this->ensureReportIsUnlocked($laporan);
 
         $latestIdentityRequest = $laporan->latestIdentityRequest;
 
@@ -589,18 +600,39 @@ class LaporanController extends Controller
         }
 
         try {
-            $identityRequest = IdentityRequest::create([
-                'laporan_id' => $laporan->id,
-                'users_id' => Auth::id(),
-                'alasan' => $validated['alasan'],
-                'bukti_path' => $evidencePath,
-                'status' => 'menunggu',
-            ]);
+            $identityRequest = DB::transaction(function () use ($laporan, $validated, $evidencePath): IdentityRequest {
+                $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+                $this->ensureReportIsUnlocked($lockedLaporan);
 
-            AuditLog::record(AuditLog::IDENTITY_REQUESTED, $laporan, [
-                'identity_request_id' => $identityRequest->id,
-                'status' => 'menunggu',
-            ]);
+                $latestIdentityRequest = $lockedLaporan->identityRequests()
+                    ->latest('id')
+                    ->lockForUpdate()
+                    ->first();
+
+                if (in_array($latestIdentityRequest?->status, ['menunggu', 'disetujui'], true)) {
+                    abort(
+                        409,
+                        $latestIdentityRequest->status === 'menunggu'
+                            ? 'Permintaan untuk laporan ini masih menunggu jawaban santri.'
+                            : 'Santri sudah menyetujui permintaan untuk laporan ini.',
+                    );
+                }
+
+                $identityRequest = IdentityRequest::create([
+                    'laporan_id' => $lockedLaporan->id,
+                    'users_id' => Auth::id(),
+                    'alasan' => $validated['alasan'],
+                    'bukti_path' => $evidencePath,
+                    'status' => 'menunggu',
+                ]);
+
+                AuditLog::record(AuditLog::IDENTITY_REQUESTED, $lockedLaporan, [
+                    'identity_request_id' => $identityRequest->id,
+                    'status' => 'menunggu',
+                ]);
+
+                return $identityRequest;
+            });
 
             return response()->json([
                 'message' => 'Permintaan identitas berhasil diajukan',
@@ -608,7 +640,17 @@ class LaporanController extends Controller
                 'laporan' => $this->reportPayload($laporan->fresh(), false),
             ], 201);
 
+        } catch (HttpException $error) {
+            if ($evidencePath) {
+                Storage::disk('local')->delete($evidencePath);
+            }
+
+            throw $error;
         } catch (Exception $error) {
+            if ($evidencePath) {
+                Storage::disk('local')->delete($evidencePath);
+            }
+
             return response()->json([
                 'message' => 'Gagal mengajukan permintaan identitas',
                 'error' => $error->getMessage(),
@@ -625,6 +667,8 @@ class LaporanController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $this->ensureReportIsUnlocked($laporan);
+
         $validated = $request->validate([
             'status' => ['required', 'in:disetujui,ditolak,1,0'],
         ]);
@@ -634,7 +678,10 @@ class LaporanController extends Controller
 
         try {
             DB::transaction(function () use ($laporan, $identityStatus): void {
-                $identityRequest = $laporan->identityRequests()
+                $lockedLaporan = Laporan::query()->lockForUpdate()->findOrFail($laporan->id);
+                $this->ensureReportIsUnlocked($lockedLaporan);
+
+                $identityRequest = $lockedLaporan->identityRequests()
                     ->where('status', 'menunggu')
                     ->latest('id')
                     ->lockForUpdate()
@@ -648,11 +695,11 @@ class LaporanController extends Controller
                     'status' => $identityStatus,
                     'dijawab' => now(),
                 ]);
-                $laporan->update([
+                $lockedLaporan->update([
                     'tampilkan_identitas' => $identityStatus === 'disetujui',
                 ]);
 
-                AuditLog::record(AuditLog::IDENTITY_RESPONDED, $laporan, [
+                AuditLog::record(AuditLog::IDENTITY_RESPONDED, $lockedLaporan, [
                     'identity_request_id' => $identityRequest->id,
                     'status' => $identityStatus,
                 ]);

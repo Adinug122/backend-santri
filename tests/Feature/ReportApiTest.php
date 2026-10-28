@@ -218,27 +218,29 @@ class ReportApiTest extends TestCase
         ]);
     }
 
-    public function test_staff_can_escalate_a_report(): void
+    public function test_pengurus_can_escalate_and_lock_a_report(): void
     {
         $staff = $this->createUser('pengurus');
         $report = $this->createReport($this->createUser('santri'));
         Sanctum::actingAs($staff);
 
-        $this->postJson("/api/reports/{$report->id}/escalate", [
-            'tujuan' => 'Bagian keamanan',
-            'keterangan' => 'Perlu ditindaklanjuti',
+        $this->postJson("/api/petugas/laporan/{$report->id}/eskalasi", [
+            'tujuan' => 'pengurus_pusat',
+            'nomor_wa_tujuan' => '+6281234567890',
+            'catatan_pengurus' => 'Perlu ditindaklanjuti',
         ])
             ->assertOk()
-            ->assertJsonPath('message', 'Eskalasi berhasil dicatat');
+            ->assertJsonPath('success', true);
 
         $this->assertDatabaseHas('catatans', [
             'users_id' => $staff->id,
             'laporan_id' => $report->id,
-            'catatan' => 'Eskalasi ke Bagian keamanan: Perlu ditindaklanjuti',
+            'catatan' => 'Eskalasi ke Pengurus Pusat: Perlu ditindaklanjuti',
         ]);
         $this->assertDatabaseHas('laporans', [
             'id' => $report->id,
-            'status' => 'diproses',
+            'status' => Laporan::STATUS_ESCALATED,
+            'is_locked' => true,
         ]);
     }
 

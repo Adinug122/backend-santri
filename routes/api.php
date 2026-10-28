@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardAiController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeactivationRequestController;
 use App\Http\Controllers\LaporanController;
+use App\Http\Controllers\LaporanEskalasiController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SantriController;
 use App\Http\Controllers\SantriImportController;
@@ -53,7 +54,15 @@ Route::middleware(['auth:sanctum', EnsurePasswordChanged::class])->group(functio
     Route::get('/reports', [LaporanController::class, 'index']);
     Route::get('/reports/{laporan}', [LaporanController::class, 'show'])->whereNumber('laporan');
     Route::patch('/reports/{laporan}/status', [LaporanController::class, 'updateStatus'])->whereNumber('laporan');
-    Route::post('/reports/{laporan}/escalate', [LaporanController::class, 'escalate'])->whereNumber('laporan');
+    Route::post('/reports/{laporan}/escalate', [LaporanEskalasiController::class, 'store'])
+        ->whereNumber('laporan')
+        ->name('reports.escalation.legacy');
+    Route::post('/petugas/laporan/{laporan}/eskalasi', [LaporanEskalasiController::class, 'store'])
+        ->whereNumber('laporan')
+        ->name('reports.escalation.store');
+    Route::get('/petugas/laporan/{laporan}/eskalasi/pdf', [LaporanEskalasiController::class, 'download'])
+        ->whereNumber('laporan')
+        ->name('reports.escalation.pdf');
     Route::get('/reports/{laporan}/messages', [LaporanController::class, 'messages'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/messages', [LaporanController::class, 'sendMessage'])->whereNumber('laporan');
     Route::post('/reports/{laporan}/notes', [LaporanController::class, 'addNote'])->whereNumber('laporan');

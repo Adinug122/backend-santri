@@ -57,8 +57,12 @@ class AuditLogTest extends TestCase
 
         $this->patchJson("/api/reports/{$report->id}/status", ['status' => 'diproses'])->assertOk();
         $this->postJson("/api/reports/{$report->id}/notes", ['catatan' => 'Catatan internal.'])->assertCreated();
-        $this->postJson("/api/reports/{$report->id}/escalate", ['tujuan' => 'Yayasan'])->assertOk();
         $this->postJson("/api/reports/{$report->id}/messages", ['isi' => 'Pesan petugas.'])->assertCreated();
+        $this->postJson("/api/petugas/laporan/{$report->id}/eskalasi", [
+            'tujuan' => 'pengurus_pusat',
+            'nomor_wa_tujuan' => '+6281234567890',
+            'catatan_pengurus' => 'Yayasan',
+        ])->assertOk();
 
         $statusLog = AuditLog::query()->where('action', AuditLog::REPORT_STATUS_CHANGED)->sole();
         $this->assertSame(['from' => 'baru', 'to' => 'diproses'], $statusLog->metadata);

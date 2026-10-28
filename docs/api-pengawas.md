@@ -484,10 +484,14 @@ Tidak ada endpoint `PUT`, `PATCH`, atau `DELETE` untuk audit log.
 | `GET` | `/reports/{id}` | staff + pengawas + pemilik | Menandai dibaca dan menulis audit untuk staff/pengawas. |
 | `DELETE` | `/reports/{id}` | pemilik (santri) | Hanya saat status `baru`; menghapus laporan beserta pesan, catatan, permintaan identitas, dan bukti terkait secara permanen. |
 | `PATCH` | `/reports/{id}/status` | staff + pengawas | Body `{ "status": "diproses" \| "selesai" }`. |
-| `POST` | `/reports/{id}/escalate` | staff + pengawas | Body `{ "tujuan": "...", "keterangan": "..." }`. |
+| `POST` | `/petugas/laporan/{id}/eskalasi` | pengurus | Body `tujuan` (`polsek`, `uppt_ppa`, `pengurus_pusat`), `nomor_wa_tujuan` (format internasional), dan `catatan_pengurus`. Mengubah status menjadi `DITERUSKAN_KE_BERWAJIB`, mengunci laporan, mencatat audit, serta mengembalikan `whatsapp_url` dan `pdf_download_url`. |
+| `GET` | `/petugas/laporan/{id}/eskalasi/pdf` | pengurus | Mengunduh PDF surat pengantar untuk laporan yang sudah dieskalasi. |
+| `POST` | `/reports/{id}/escalate` | pengurus | Alias path lama; sekarang memakai payload dan perilaku endpoint eskalasi baru. |
 | `GET` | `/reports/{id}/messages` | staff + pengawas + pemilik | Menandai dibaca. |
 | `POST` | `/reports/{id}/messages` | staff + pengawas + pemilik | Body `{ "isi": "..." }`. |
 | `POST` | `/reports/{id}/notes` | staff + pengawas | Catatan internal. |
 | `POST` | `/reports/{id}/identity-request` | pimpinan + pengawas | Hanya untuk laporan yang boleh diakses; body `alasan` wajib, `bukti` opsional (jpg/jpeg/png/pdf, maks 10 MB). |
 | `PATCH` | `/reports/{id}/identity-request` | pemilik (santri) | Body `{ "status": "disetujui" \| "ditolak" \| 1 \| 0 }`. |
 | `PATCH` | `/reports/{id}/identity` | pemilik (santri) | Toggle atau set `tampilkan_identitas`. |
+
+Setelah eskalasi berhasil, laporan berstatus `DITERUSKAN_KE_BERWAJIB` dan terkunci. Endpoint mutasi laporan menolak perubahan maupun penghapusan pada laporan terkunci.

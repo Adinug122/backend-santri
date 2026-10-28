@@ -10,6 +10,8 @@ class Laporan extends Model
 {
     public const LATE_AFTER_HOURS = 24;
 
+    public const STATUS_ESCALATED = 'DITERUSKAN_KE_BERWAJIB';
+
     /**
      * Kolom penanda "sudah dibaca" untuk setiap peran pengguna.
      *
@@ -35,6 +37,7 @@ class Laporan extends Model
         'menyangkut_pimpinan',
         'status',
         'status_diubah',
+        'is_locked',
         'santri_dibaca',
         'pengurus_dibaca',
         'pimpinan_dibaca',
@@ -48,6 +51,7 @@ class Laporan extends Model
         'waktu' => 'datetime',
         'status' => 'string',
         'status_diubah' => 'datetime',
+        'is_locked' => 'boolean',
         'santri_dibaca' => 'datetime',
         'pengurus_dibaca' => 'datetime',
         'pimpinan_dibaca' => 'datetime',

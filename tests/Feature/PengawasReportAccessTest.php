@@ -202,8 +202,11 @@ class PengawasReportAccessTest extends TestCase
         $this->postJson("/api/reports/{$flagged->id}/notes", ['catatan' => 'Diteruskan ke yayasan.'])
             ->assertCreated();
 
-        $this->postJson("/api/reports/{$flagged->id}/escalate", ['tujuan' => 'Yayasan'])
-            ->assertOk();
+        $this->postJson("/api/petugas/laporan/{$flagged->id}/eskalasi", [
+            'tujuan' => 'pengurus_pusat',
+            'nomor_wa_tujuan' => '+6281234567890',
+            'catatan_pengurus' => 'Yayasan',
+        ])->assertForbidden();
 
         $this->postJson("/api/reports/{$flagged->id}/identity-request", [
             'alasan' => 'Diperlukan untuk pemeriksaan independen.',
@@ -215,6 +218,7 @@ class PengawasReportAccessTest extends TestCase
         $this->assertDatabaseHas('laporans', [
             'id' => $flagged->id,
             'status' => 'diproses',
+            'is_locked' => false,
         ]);
         $this->assertDatabaseHas('laporans', [
             'id' => $regular->id,
