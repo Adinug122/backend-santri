@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('santris', function (Blueprint $table) {
             $table->id();
             $table->foreignId('users_id')->constrained('users')->onDelete('cascade');
-            $table->enum('jenis_kelamin',['laki','perempuan']);
+            $table->enum('jenis_kelamin', ['laki', 'perempuan']);
             $table->string('telepon_ortu');
             $table->timestamps();
         });

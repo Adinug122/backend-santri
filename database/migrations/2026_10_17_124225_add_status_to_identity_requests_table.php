@@ -12,10 +12,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('identity_requests', function (Blueprint $table) {
-            $table->string('status')->default('menunggu')->after('bukti_path');
+            $table->enum('status', ['menunggu', 'disetujui', 'ditolak', 'dicabut'])->default('menunggu')->after('bukti_path');
         });
     }
-    
+
     /**
      * Reverse the migrations.
      */

@@ -40,7 +40,8 @@ class PengawasReportAccessTest extends TestCase
             'isi' => 'Lampu kamar rusak.',
         ])
             ->assertCreated()
-            ->assertJsonPath('laporan.menyangkut_pimpinan', false);
+            ->assertJsonPath('laporan.menyangkut_pimpinan', false)
+            ->assertJsonPath('laporan.terlambat', false);
 
         $this->assertDatabaseHas('laporans', [
             'users_id' => $santri->id,
@@ -148,17 +149,22 @@ class PengawasReportAccessTest extends TestCase
 
     public function test_late_scope_and_accessor_follow_status_and_24_hour_limit(): void
     {
-        Carbon::setTestNow('2026-10-28 12:00:00');
+        $this->travelTo(Carbon::parse('2026-10-28 12:00:00'));
         $owner = $this->createUser('santri');
         $report23HoursOld = $this->createReport($owner);
+        $reportExactly24HoursOld = $this->createReport($owner);
         $report25HoursOld = $this->createReport($owner);
         $processedReport25HoursOld = $this->createReport($owner);
         $this->ageReport($report23HoursOld, 23);
+        Laporan::query()->whereKey($reportExactly24HoursOld->id)->update([
+            'created_at' => now()->subHours(24),
+        ]);
         $this->ageReport($report25HoursOld, 25);
         $this->ageReport($processedReport25HoursOld, 25);
         $processedReport25HoursOld->update(['status' => 'diproses']);
 
         $this->assertFalse($report23HoursOld->fresh()->terlambat);
+        $this->assertFalse($reportExactly24HoursOld->fresh()->terlambat);
         $this->assertTrue($report25HoursOld->fresh()->terlambat);
         $this->assertFalse($processedReport25HoursOld->fresh()->terlambat);
         $this->assertSame(

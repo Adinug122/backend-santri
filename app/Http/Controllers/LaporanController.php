@@ -188,7 +188,7 @@ class LaporanController extends Controller
             ->visibleToRole(Auth::user()?->role)
             ->with(['user', 'catatans.user', 'latestIdentityRequest', 'percakapans.pengirim'])
             ->orderByRaw(
-                'CASE WHEN status = ? AND created_at <= ? THEN 0 ELSE 1 END',
+                'CASE WHEN status = ? AND created_at < ? THEN 0 ELSE 1 END',
                 ['baru', now()->subHours(Laporan::LATE_AFTER_HOURS)],
             )
             ->latest()
@@ -228,7 +228,7 @@ class LaporanController extends Controller
 
             return response()->json([
                 'message' => 'Laporan berhasil dibuat',
-                'laporan' => $laporan,
+                'laporan' => $laporan->append('terlambat'),
             ], 201);
         } catch (Exception $error) {
             // Return response gagal (500 Internal Server Error)

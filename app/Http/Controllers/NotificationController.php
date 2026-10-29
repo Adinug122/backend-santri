@@ -27,6 +27,7 @@ class NotificationController extends Controller
         'pesan_baru' => 2,
         'status_diubah' => 3,
         'permintaan_identitas' => 4,
+        'laporan_terlambat' => 5,
     ];
 
     /**
@@ -64,7 +65,7 @@ class NotificationController extends Controller
             return null;
         }
 
-        return [
+        $queries = [
             'laporan_baru' => Laporan::query()
                 ->visibleToRole($user->role)
                 ->where('status', 'baru')
@@ -81,15 +82,23 @@ class NotificationController extends Controller
                         });
                 }),
         ];
+
+        if ($user->role === 'pengawas') {
+            $queries['laporan_terlambat'] = Laporan::query()
+                ->visibleToRole($user->role)
+                ->terlambat();
+        }
+
+        return $queries;
     }
 
     #[Endpoint(
         title: 'Ringkasan notifikasi',
-        description: 'Mengembalikan jumlah laporan yang memiliki pembaruan untuk pengguna yang sedang login. Kunci data bergantung pada role: santri menerima permintaan_identitas, pesan_baru, dan status_diubah; pengurus/pimpinan menerima laporan_baru dan pesan_baru. Nilai pembaruan adalah jumlah seluruh kategori, sehingga satu laporan dapat dihitung lebih dari sekali. Respons menyertakan ETag agar polling dapat memakai If-None-Match.',
+        description: 'Mengembalikan jumlah laporan yang memiliki pembaruan untuk pengguna yang sedang login. Santri menerima permintaan_identitas, pesan_baru, dan status_diubah; pengurus/pimpinan menerima laporan_baru dan pesan_baru; pengawas juga menerima laporan_terlambat yang tetap dihitung sampai status laporan berubah dari baru. Nilai pembaruan adalah jumlah seluruh kategori, sehingga satu laporan dapat dihitung lebih dari sekali. Respons menyertakan ETag agar polling dapat memakai If-None-Match.',
     )]
     #[Response(
         description: 'Ringkasan notifikasi berhasil diambil.',
-        type: "array{message: 'Berhasil mengambil notifikasi.', code: 'NOTIFICATION_FETCH_SUCCESS', data: array{permintaan_identitas?: int, pesan_baru?: int, status_diubah?: int, laporan_baru?: int, pembaruan: int}}",
+        type: "array{message: 'Berhasil mengambil notifikasi.', code: 'NOTIFICATION_FETCH_SUCCESS', data: array{permintaan_identitas?: int, pesan_baru?: int, status_diubah?: int, laporan_baru?: int, laporan_terlambat?: int, pembaruan: int}}",
     )]
     public function summary(Request $request): JsonResponse
     {
@@ -119,11 +128,11 @@ class NotificationController extends Controller
 
     #[Endpoint(
         title: 'Daftar notifikasi',
-        description: 'Mengembalikan notifikasi belum dibaca untuk pengguna yang sedang login, satu item per kategori per laporan (sama dengan granularitas ringkasan), diurutkan dari yang terbaru. Daftar ini tidak menandai laporan sebagai sudah dibaca; penandaan terjadi saat detail laporan atau pesan dibuka.',
+        description: 'Mengembalikan notifikasi belum dibaca untuk pengguna yang sedang login, satu item per kategori per laporan, diurutkan dari yang terbaru. Peringatan laporan_terlambat untuk pengawas bersifat persisten sampai status laporan berubah dari baru, termasuk setelah laporan dibuka. Daftar ini tidak menandai laporan sebagai sudah dibaca; penandaan terjadi saat detail laporan atau pesan dibuka.',
     )]
     #[Response(
         description: 'Daftar notifikasi berhasil diambil.',
-        type: "array{message: 'Berhasil mengambil daftar notifikasi.', code: 'NOTIFICATION_LIST_SUCCESS', data: array{items: array<int, array{id: int, tipe: 'laporan_baru'|'pesan_baru'|'status_diubah'|'permintaan_identitas', laporan_id: int, no_laporan: string, kategori: string, waktu: string|null, status_baru: string|null, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}>, meta: array{current_page: int, per_page: int, total: int, last_page: int, from: int|null, to: int|null}}}",
+        type: "array{message: 'Berhasil mengambil daftar notifikasi.', code: 'NOTIFICATION_LIST_SUCCESS', data: array{items: array<int, array{id: int, tipe: 'laporan_baru'|'laporan_terlambat'|'pesan_baru'|'status_diubah'|'permintaan_identitas', laporan_id: int, no_laporan: string, kategori: string, waktu: string|null, status_baru: string|null, pengirim: array{id: int, name: string, role: string}|null, preview: string, url: string}>, meta: array{current_page: int, per_page: int, total: int, last_page: int, from: int|null, to: int|null}}}",
     )]
     public function index(Request $request): JsonResponse
     {
@@ -148,7 +157,7 @@ class NotificationController extends Controller
             $relations = match ($tipe) {
                 'permintaan_identitas' => ['identityRequests.user'],
                 'pesan_baru' => ['percakapans.pengirim'],
-                'laporan_baru' => ['user'],
+                'laporan_baru', 'laporan_terlambat' => ['user'],
                 default => [],
             };
 
@@ -220,6 +229,11 @@ class NotificationController extends Controller
                 null,
                 "Status laporan diubah menjadi {$laporan->status}.",
             ],
+            'laporan_terlambat' => [
+                $laporan->created_at?->copy()->addHours(Laporan::LATE_AFTER_HOURS),
+                $this->senderPayload($laporan->user, $laporan, $identityVisible),
+                sprintf('Laporan belum ditinjau lebih dari %d jam.', Laporan::LATE_AFTER_HOURS),
+            ],
             default => [
                 $laporan->created_at,
                 $this->senderPayload($laporan->user, $laporan, $identityVisible),
@@ -234,7 +248,7 @@ class NotificationController extends Controller
             'no_laporan' => $laporan->no_laporan,
             'kategori' => $laporan->kategori,
             'waktu' => $waktu,
-            'status_baru' => in_array($tipe, ['laporan_baru', 'status_diubah'], true)
+            'status_baru' => in_array($tipe, ['laporan_baru', 'laporan_terlambat', 'status_diubah'], true)
                 ? $laporan->status
                 : null,
             'pengirim' => $pengirim,

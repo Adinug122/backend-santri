@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('kategori');
             $table->text('isi');
             $table->boolean('tampilkan_identitas');
-            $table->enum('status',['diproses','baru','selesai'])->default('baru');
+            $table->enum('status', ['diproses', 'baru', 'selesai'])->default('baru');
             $table->dateTime('waktu');
             $table->timestamps();
         });

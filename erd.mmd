@@ -1,0 +1,25 @@
+erDiagram
+    USER ||--o{ SANTRI : "has one"
+    USER ||--o{ CATATAN : "has many"
+    USER ||--o{ PERCAKAPAN : "has many (as pengirim)"
+    USER ||--o{ IDENTITY_REQUEST : "has many"
+    USER ||--o{ ACCOUNT_DEACTIVATION_REQUEST : "has many (as requester/decider)"
+    
+    SANTRI }o--|| USER : "belongs to"
+    
+    LAKAN ||--o{ CATATAN : "has many"
+    LAKAN ||--o{ IDENTITY_REQUEST : "has many"
+    LAKAN ||--o{ PERCAKAPAN : "has many"
+    
+    CATATAN }o--|| USER : "belongs to"
+    CATATAN }o--|| LAKAN : "belongs to"
+    
+    PERCAKAPAN }o--|| USER : "belongs to (pengirim)"
+    PERCAKAPAN }o--|| LAKAN : "belongs to"
+    
+    IDENTITY_REQUEST }o--|| LAKAN : "belongs to"
+    IDENTITY_REQUEST }o--|| USER : "belongs to"
+    
+    ACCOUNT_DEACTIVATION_REQUEST }o--|| USER : "belongs to (user)"
+    ACCOUNT_DEACTIVATION_REQUEST }o--|| USER : "belongs to (requester)"
+    ACCOUNT_DEACTIVATION_REQUEST }o--|| USER : "belongs to (decider)"

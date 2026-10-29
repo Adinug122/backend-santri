@@ -100,14 +100,14 @@ class Laporan extends Model
     {
         return $query
             ->where('status', 'baru')
-            ->where('created_at', '<=', now()->subHours(self::LATE_AFTER_HOURS));
+            ->where('created_at', '<', now()->subHours(self::LATE_AFTER_HOURS));
     }
 
     public function getTerlambatAttribute(): bool
     {
         return $this->status === 'baru'
             && $this->created_at !== null
-            && $this->created_at->lte(now()->subHours(self::LATE_AFTER_HOURS));
+            && $this->created_at->lt(now()->subHours(self::LATE_AFTER_HOURS));
     }
 
     public function user()

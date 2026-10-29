@@ -6,6 +6,7 @@ use App\Models\IdentityRequest;
 use App\Models\Laporan;
 use App\Models\Percakapan;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -187,6 +188,72 @@ class NotificationApiTest extends TestCase
             $this->assertSame(0, $data['pesan_baru']);
             $this->assertSame(1, $data['pembaruan']);
         }
+    }
+
+    public function test_pengawas_receives_persistent_notifications_for_late_reports(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-28 12:00:00'));
+        $owner = $this->createUser('santri');
+        $lateReport = $this->createReport($owner);
+        $lateReport->update(['menyangkut_pimpinan' => true]);
+        Laporan::query()->whereKey($lateReport->id)->update([
+            'created_at' => now()->subHours(25),
+        ]);
+
+        $recentReport = $this->createReport($owner);
+        $recentReport->update(['menyangkut_pimpinan' => true]);
+
+        $regularLateReport = $this->createReport($owner);
+        Laporan::query()->whereKey($regularLateReport->id)->update([
+            'created_at' => now()->subHours(25),
+        ]);
+
+        Sanctum::actingAs($this->createUser('pengawas'));
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.laporan_baru', 2)
+            ->assertJsonPath('data.laporan_terlambat', 1)
+            ->assertJsonPath('data.pembaruan', 3);
+
+        $items = $this->getJson('/api/notifications')
+            ->assertOk()
+            ->json('data.items');
+        $lateNotifications = collect($items)
+            ->where('tipe', 'laporan_terlambat')
+            ->values();
+
+        $this->assertCount(1, $lateNotifications);
+        $this->assertSame($lateReport->id, $lateNotifications[0]['laporan_id']);
+        $this->assertSame($lateReport->id * 10 + 5, $lateNotifications[0]['id']);
+        $this->assertSame('baru', $lateNotifications[0]['status_baru']);
+        $this->assertSame('Laporan belum ditinjau lebih dari 24 jam.', $lateNotifications[0]['preview']);
+        $this->assertNull($lateNotifications[0]['pengirim']);
+
+        $this->getJson("/api/reports/{$lateReport->id}")->assertOk();
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonPath('data.laporan_terlambat', 1);
+    }
+
+    public function test_late_report_notification_is_not_exposed_to_pimpinan(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-28 12:00:00'));
+        $report = $this->createReport($this->createUser('santri'));
+        $report->update(['menyangkut_pimpinan' => true]);
+        Laporan::query()->whereKey($report->id)->update([
+            'created_at' => now()->subHours(25),
+        ]);
+        Sanctum::actingAs($this->createUser('pimpinan'));
+
+        $this->getJson('/api/notifications/summary')
+            ->assertOk()
+            ->assertJsonMissingPath('data.laporan_terlambat');
+
+        $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(0, 'data.items');
     }
 
     public function test_unauthenticated_summary_returns_json_401_without_accept_header(): void
