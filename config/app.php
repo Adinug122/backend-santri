@@ -105,6 +105,7 @@ return [
         ),
     ],
 
+    
     /*
     |--------------------------------------------------------------------------
     | Maintenance Mode Driver
@@ -117,6 +118,7 @@ return [
     | Supported drivers: "file", "cache", "array"
     |
     */
+    
 
     'maintenance' => [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
